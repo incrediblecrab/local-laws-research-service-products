@@ -171,7 +171,7 @@ def codifiers(manifest):
         "- Municode, owned by CivicPlus. When CivicPlus announced that it had acquired Municode, Municode hosted \"over 3,900 local government codes and 190,000 individual ordinances\" ([CivicPlus](https://www.civicplus.com/news/nn/civicplus-acquires-municode/)).",
         f"- ICC Code Solutions, the International Code Council's union of General Code (eCode360) and American Legal Publishing, which \"now supports more than 7,000 communities across 47 states, Canada and more than a dozen tribal territories\" ([ICC, July 16, 2026]({ICC_RELEASE})).",
         "",
-        "This dataset does not collect from them, because their terms forbid automated collection. The [ICC's Terms of Use](https://www.iccsafe.org/about/terms-of-use/) (last revised May 4, 2023) name General Code and American Legal Publishing among the companies they cover and eCode 360 among their E-Content, and say in §4:",
+        "This dataset does not collect from them, because their terms restrict automated collection. The [ICC's Terms of Use](https://www.iccsafe.org/about/terms-of-use/) (last revised May 4, 2023) name General Code and American Legal Publishing among the companies they cover and eCode 360 among their E-Content, and say in §4:",
         "",
         "> the licenses ICC grants to use our E-Content, as set forth in these Terms of Use and applicable E-Content Terms, do not include any: ... or use of data mining, robots, or similar data gathering and extraction tools with any Service or E-Content. Please contact us at license@iccsafe.org to discuss additional licenses for further uses.",
         "",
