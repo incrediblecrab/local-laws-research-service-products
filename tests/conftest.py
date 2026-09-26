@@ -1,4 +1,4 @@
-"""Shared fixtures: the Census sample (real rows), a synthetic LOCUS (invented text; LOCUS's own is CC BY-NC), a sample of New York's local-law filings (real metadata) behind a fake of its API, a fake fetcher and a build published to a local store."""
+"""Shared fixtures: the Census sample (real rows), a synthetic LOCUS (invented text; LOCUS's own is CC BY-NC), a sample of New York's local-law filings (real metadata) behind a fake of its API, a sample of New York's older index (real records, CC0), a fake fetcher and a build published to a local store."""
 
 import copy
 import hashlib
@@ -14,7 +14,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from local_laws import census, nylaws
+from local_laws import census, nyindex, nylaws
 from local_laws.build import build
 from local_laws.store import LocalStore
 
@@ -22,6 +22,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 UNITS = (FIXTURES / "govt_units_sample.zip").read_bytes()
 ORG02 = (FIXTURES / "org02_sample.zip").read_bytes()
 NY_SAMPLE = json.loads((FIXTURES / "ny_snapshot_sample.json").read_text())
+NY_INDEX = (FIXTURES / "ny_index_sample.zip").read_bytes()
 BUILT_AT = "2026-09-25T00:00:00Z"
 CODE = {"version": "test", "commit": "0" * 40, "dirty": False}
 
@@ -168,10 +169,10 @@ class FakeNYApi:
 
 
 class FakeFetcher:
-    """Answers the two Census URLs with the fixtures and New York's API from a FakeNYApi; a value that is an exception is raised instead."""
+    """Answers the two Census URLs and the New York index's with the fixtures and New York's API from a FakeNYApi; a value that is an exception is raised instead."""
 
     def __init__(self, responses=None, ny=None):
-        self.responses = {census.GOVT_UNITS_URL: UNITS, census.ORG02_URL: ORG02} | (responses or {})
+        self.responses = {census.GOVT_UNITS_URL: UNITS, census.ORG02_URL: ORG02, nyindex.URL: NY_INDEX} | (responses or {})
         self.ny = ny or FakeNYApi()
         self.requests = 0
 
@@ -205,9 +206,10 @@ def edited_units(edit):
 
 @pytest.fixture
 def pins(monkeypatch):
-    """Pin the Census fixtures' SHA-256 in place of the real files'."""
+    """Pin the fixtures' SHA-256 in place of the real files'."""
     monkeypatch.setattr(census, "GOVT_UNITS_SHA256", sha256(UNITS))
     monkeypatch.setattr(census, "ORG02_SHA256", sha256(ORG02))
+    monkeypatch.setattr(nyindex, "SHA256", sha256(NY_INDEX))
 
 
 @pytest.fixture

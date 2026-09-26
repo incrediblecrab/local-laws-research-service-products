@@ -7,7 +7,7 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
-from . import __version__, census, locus, nylaws, schema
+from . import __version__, census, locus, nyindex, nylaws, schema
 from .card import render
 from .census import SourceChanged
 from .store import CARD, MANIFEST, write_parquet
@@ -17,6 +17,7 @@ SORT_KEYS = {
     "locus_crosswalk": lambda row: (row["locus_state"], row["locus_jurisdiction_type"], row["locus_name"]),
     # The Department names new PDFs in increasing order, so a rebuild with new filings changes only the file's last chunks.
     "ny_local_laws": lambda row: (row["filename"], row["asset_id"]),
+    "ny_local_law_index": lambda row: row["index_row"],
 }
 # Manifest keys that change with every build even when nothing they describe does; a build that differs from the published one only in these is not committed.
 VOLATILE = ("built_at", "code")
@@ -37,7 +38,7 @@ def code_version():
     return {"version": __version__, "commit": commit, "dirty": None if status is None else bool(status)}
 
 
-def summarize(governments, crosswalk, ny):
+def summarize(governments, crosswalk, ny, index):
     """The counts the card shows. verify recomputes them from the published tables, so they are only ever what the data holds."""
     matched = {row["census_id"] for row in crosswalk if row["census_id"]}
     types = {}
@@ -89,6 +90,7 @@ def summarize(governments, crosswalk, ny):
             "unmatched": names(row for row in crosswalk if row["match"] == "unmatched"),
         },
         "ny": nylaws.stats(ny, governments),
+        "ny_index": nyindex.stats(index, governments, ny),
     }
 
 
@@ -121,9 +123,11 @@ def build(fetcher, workdir, locus_download=None, ny_snapshot=None, built_at=None
     ny = nylaws.match(nylaws.rows(snapshot), governments)
     if len(ny) != snapshot["total"] or Counter(str(row["date_filed"].year) for row in ny) != Counter(snapshot["years"]):
         raise SourceChanged(f"the NY snapshot holds {len(ny):,} filings; its API counts say {snapshot['total']:,}, by year {snapshot['years']}")
+    index, state_records = nyindex.read(nyindex.download(fetcher))
+    index = nyindex.match(index, governments)
     stage = Path(workdir) / "stage"
     files, entries = {}, {}
-    for name, rows in (("governments", governments), ("locus_crosswalk", crosswalk), ("ny_local_laws", ny)):
+    for name, rows in (("governments", governments), ("locus_crosswalk", crosswalk), ("ny_local_laws", ny), ("ny_local_law_index", index)):
         spec = schema.TABLES[name]
         local = stage / spec["file"]
         entries[spec["file"]] = write_parquet(rows, local, spec["schema"], SORT_KEYS[name])
@@ -136,9 +140,11 @@ def build(fetcher, workdir, locus_download=None, ny_snapshot=None, built_at=None
             "census_org02": {"url": census.ORG02_URL, "sha256": census.ORG02_SHA256, "counts_compared": len(org02), "mismatches": 0},
             "locus": {"repo_id": locus.REPO_ID, "revision": locus.REVISION, "license": locus.LICENSE, "rows": stated, "jurisdictions": len(crosswalk)},
             "ny_local_laws": {key: snapshot[key] for key in ("api", "category", "started_at", "finished_at", "total", "years")} | {"app": nylaws.APP},
+            "ny_local_law_index": {"doi": nyindex.DOI, "record": nyindex.RECORD, "url": nyindex.URL, "sha256": nyindex.SHA256, "repository": nyindex.REPOSITORY, "commit": nyindex.COMMIT,
+                                   "license": nyindex.LICENSE, "rows": len(index), "state_records": state_records},
         },
         "files": entries,
-        "stats": summarize(governments, crosswalk, ny),
+        "stats": summarize(governments, crosswalk, ny, index),
     }
     files[MANIFEST] = stage / MANIFEST
     files[MANIFEST].write_text(manifest_text(manifest))

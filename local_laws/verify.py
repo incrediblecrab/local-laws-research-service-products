@@ -1,4 +1,4 @@
-"""Checks a published build: its files against manifest.json, its tables against their schemas and each other, its counts against the Census's own table, LOCUS's card and the New York API's counts at the harvest, and its card against a fresh render."""
+"""Checks a published build: its files against manifest.json, its tables against their schemas and each other, its counts against the Census's own table, LOCUS's card and the New York API's counts at the harvest, New York's index against its release, and its card against a fresh render."""
 
 import json
 import re
@@ -6,7 +6,7 @@ from collections import Counter
 
 import pyarrow as pa
 
-from . import census, locus, nylaws
+from . import census, locus, nyindex, nylaws
 from .build import summarize
 from .card import render
 from .schema import TABLES
@@ -88,30 +88,75 @@ def check_ny(rows, governments, source, problems):
     links = [row["asset_id"] for row in rows if not row["share_url"] or not nylaws.SHARE.fullmatch(row["share_url"])]
     if links:
         problems.append(f"ny_local_laws: share_url is not the Department's public link: {sample(links)}")
+    check_matches("ny_local_laws", rows, "asset_id", governments, problems)
+
+
+def check_matches(name, rows, key, governments, problems, read_type=None):
+    """The match of a New York table's rows, each named by its key column: census_id, match and candidates agree, a census_id is a New York government with the Census title the row's type gives, read by read_type if given, and all three are what the matching rules give the row's type and name.
+    governments is None when that table was not read, so no census_id is judged against it."""
     unknown = sorted({row["match"] for row in rows} - set(nylaws.MATCHES))
     if unknown:
-        problems.append(f"ny_local_laws: match values {unknown} are not among {list(nylaws.MATCHES)}")
+        problems.append(f"{name}: match values {unknown} are not among {list(nylaws.MATCHES)}")
     titles = None if governments is None else {row["census_id"]: nylaws.split_title(row["name"])[0] for row in governments if row["state"] == "NY"}
     inconsistent, stray, mistitled = [], [], []
     for row in rows:
         unmatched = row["match"] not in nylaws.MATCHED
         if (row["census_id"] is None) != unmatched or bool(row["candidates"]) != (row["match"] == "ambiguous"):
-            inconsistent.append(row["asset_id"])
+            inconsistent.append(row[key])
         elif titles is not None and row["census_id"] is not None:
+            kind = row["municipality_type"] if read_type is None else read_type(row["municipality_type"])
             if row["census_id"] not in titles:
-                stray.append(row["asset_id"])
-            elif titles[row["census_id"]] != nylaws.TITLES.get(row["municipality_type"]):
-                mistitled.append(row["asset_id"])
+                stray.append(row[key])
+            elif titles[row["census_id"]] != nylaws.TITLES.get(kind):
+                mistitled.append(row[key])
     if inconsistent:
-        problems.append(f"ny_local_laws: census_id, match and candidates disagree: {sample(inconsistent)}")
+        problems.append(f"{name}: census_id, match and candidates disagree: {sample(inconsistent)}")
     if stray:
-        problems.append(f"ny_local_laws: census_id is not a New York government in governments: {sample(stray)}")
+        problems.append(f"{name}: census_id is not a New York government in governments: {sample(stray)}")
     if mistitled:
-        problems.append(f"ny_local_laws: census_id's Census title is not the one municipality_type gives: {sample(mistitled)}")
+        problems.append(f"{name}: census_id's Census title is not the one municipality_type gives: {sample(mistitled)}")
+    if titles is None:
+        return
+    try:
+        again = nylaws.match([{"municipality_type": row["municipality_type"], "municipality_name": row["municipality_name"]} for row in rows], governments, read_type)
+    except census.SourceChanged as error:
+        problems.append(f"{name}: the match cannot be recomputed from governments: {error}")
+        return
+    rematched = [row[key] for row, fresh in zip(rows, again) if (row["census_id"], row["match"], row["candidates"]) != (fresh["census_id"], fresh["match"], fresh["candidates"])]
+    if rematched:
+        problems.append(f"{name}: census_id, match and candidates are not what the matching rules give the row's type and name: {sample(rematched)}")
+
+
+def check_ny_index(rows, governments, source, problems):
+    """governments is None when that table was not read, so no census_id is judged against it. source is the manifest's record of the release."""
+    positions = Counter(row["index_row"] for row in rows)
+    if sorted(positions) != list(range(1, len(rows) + 1)):
+        repeated = [n for n, count in positions.items() if count > 1]
+        problems.append(f"ny_local_law_index: index_row is not 1 to {len(rows):,}, once each" + (f"; repeated: {sample(repeated)}" if repeated else ""))
+    for field in ("rows", "state_records"):
+        if len(rows) != source.get(field):
+            problems.append(f"ny_local_law_index: {len(rows):,} rows; the manifest's source gives {field} {source.get(field)}")
+    check_matches("ny_local_law_index", rows, "index_row", governments, problems, nyindex.read_type)
+
+
+def compare_ny_index(rows, data, problems):
+    """The published rows against the pinned release: each row equal to the export's line at its index_row, and all of them, field for field, the State's records."""
+    export = {row["index_row"]: row for row in nyindex.rows(census.zip_member(data, nyindex.EXPORT_MEMBER))}
+    state = nyindex.state_records(census.zip_member(data, nyindex.STATE_MEMBER))
+    changed = [row["index_row"] for row in rows if {field: row[field] for field in nyindex.FIELDS} != export.get(row["index_row"])]
+    if changed:
+        problems.append(f"ny_local_law_index: rows that are not the release's export line at their index_row: {sample(changed)}")
+    missing = sorted(set(export) - {row["index_row"] for row in rows})
+    if missing:
+        problems.append(f"ny_local_law_index: export lines not in the table: {sample(missing)}")
+    published, held = Counter(map(nyindex.record, rows)), Counter(state)
+    if published != held:
+        problems.append(f"ny_local_law_index: {sum((published - held).values()):,} rows are not records in the State's {nyindex.STATE_MEMBER}, and {sum((held - published).values()):,} records are not rows")
+    return len(state)
 
 
 def verify(store, fetcher=None, stated_rows=None):
-    """A report whose "problems" is empty when every check passed. With a fetcher, CG2200ORG02 is downloaded again and compared; with stated_rows (a callable), LOCUS's card is read again."""
+    """A report whose "problems" is empty when every check passed. With a fetcher, CG2200ORG02 and New York's index are downloaded again and compared; with stated_rows (a callable), LOCUS's card is read again."""
     text = store.read_text(MANIFEST)
     if text is None:
         return {"problems": [f"no {MANIFEST}"]}
@@ -153,7 +198,7 @@ def verify(store, fetcher=None, stated_rows=None):
         tables[name] = table.to_pylist()
     report = {"rows": {name: len(rows) for name, rows in tables.items()}}
     sources = manifest.get("sources") or {}
-    pins = {("census_governments", "sha256"): census.GOVT_UNITS_SHA256, ("census_org02", "sha256"): census.ORG02_SHA256, ("locus", "revision"): locus.REVISION}
+    pins = {("census_governments", "sha256"): census.GOVT_UNITS_SHA256, ("census_org02", "sha256"): census.ORG02_SHA256, ("locus", "revision"): locus.REVISION, ("ny_local_law_index", "sha256"): nyindex.SHA256}
     for (source, field), pin in pins.items():
         if (sources.get(source) or {}).get(field) != pin:
             problems.append(f"the manifest's {source} {field} is {(sources.get(source) or {}).get(field)!r}; this code pins {pin}")
@@ -182,9 +227,14 @@ def verify(store, fetcher=None, stated_rows=None):
     ny = tables.get("ny_local_laws")
     if ny is not None:
         check_ny(ny, governments, sources.get("ny_local_laws") or {}, problems)
-    if governments is not None and crosswalk is not None and ny is not None:
+    index = tables.get("ny_local_law_index")
+    if index is not None:
+        check_ny_index(index, governments, sources.get("ny_local_law_index") or {}, problems)
+        if fetcher is not None:
+            report["ny_index_state_records"] = compare_ny_index(index, nyindex.download(fetcher), problems)
+    if governments is not None and crosswalk is not None and ny is not None and index is not None:
         try:
-            stats = json.loads(json.dumps(summarize(governments, crosswalk, ny)))
+            stats = json.loads(json.dumps(summarize(governments, crosswalk, ny, index)))
         except (KeyError, TypeError) as error:
             problems.append(f"the manifest's stats cannot be recomputed from the tables: {type(error).__name__}: {error}")
         else:

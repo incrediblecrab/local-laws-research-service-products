@@ -7,16 +7,16 @@ import json
 import pytest
 
 from conftest import CODE, NY_SAMPLE, FakeFetcher, FakeNYApi, fake_locus_download
-from local_laws import census, cli, locus, nylaws
+from local_laws import census, cli, locus, nyindex, nylaws
 from local_laws.http import Blocked, Unavailable
 from local_laws.store import CARD, MANIFEST, LocalStore, Superseded
 
-FILES = [CARD, "data/governments.parquet", "data/locus_crosswalk.parquet", "data/ny_local_laws.parquet", MANIFEST]
+FILES = [CARD, "data/governments.parquet", "data/locus_crosswalk.parquet", "data/ny_local_law_index.parquet", "data/ny_local_laws.parquet", MANIFEST]
 
 
 @pytest.fixture
 def offline(monkeypatch, pins):
-    """The CLI with the Census fixtures for downloads, the synthetic LOCUS, and a clean committed tree."""
+    """The CLI with the Census and New York index fixtures for downloads, the synthetic LOCUS, and a clean committed tree."""
     monkeypatch.setattr(cli, "Fetcher", FakeFetcher)
     monkeypatch.setattr(locus, "download", fake_locus_download)
     monkeypatch.setattr(locus, "stated_rows", lambda: 71)
@@ -43,7 +43,7 @@ class DownNYApi(FakeNYApi):
 def test_run_writes_a_build_that_verifies_and_an_unchanged_rerun_writes_nothing(tmp_path, offline, capsys, snapshot):
     out, work = tmp_path / "out", tmp_path / "work"
     assert run("run", "--local", str(out), "--workdir", str(work), "--ny-snapshot", snapshot) == 0
-    assert json.loads(capsys.readouterr().out) == {"governments": 50, "locus_jurisdictions": 25, "matched": 23, "ny_filings": 25, "ny_matched": 10, "requests": 2, "commit": "1", "unchanged": False}
+    assert json.loads(capsys.readouterr().out) == {"governments": 50, "locus_jurisdictions": 25, "matched": 23, "ny_filings": 25, "ny_matched": 10, "ny_index_rows": 14, "ny_index_matched": 7, "requests": 3, "commit": "1", "unchanged": False}
     assert LocalStore(out).list_files() == FILES
     assert not any(path.name.startswith("locus-") for path in work.iterdir()), "LOCUS's download is deleted after the build"
     manifest = (out / MANIFEST).read_text()
@@ -61,12 +61,12 @@ def test_a_run_without_a_snapshot_reads_the_api_and_harvest_ny_saves_the_same_re
     live, saved, path = tmp_path / "live", tmp_path / "saved", tmp_path / "ny.json.gz"
     assert run("run", "--local", str(live)) == 0
     summary = json.loads(capsys.readouterr().out)
-    assert (summary["ny_filings"], summary["ny_matched"], summary["requests"] > 2, summary["unchanged"]) == (25, 10, True, False)
+    assert (summary["ny_filings"], summary["ny_matched"], summary["requests"] > 3, summary["unchanged"]) == (25, 10, True, False)
     assert run("run", "--local", str(live)) == 0
     assert json.loads(capsys.readouterr().out)["unchanged"] is False, "a new reading of the API is a new build: the manifest says when it was read"
     assert run("harvest-ny", "--out", str(path)) == 0
     report = json.loads(capsys.readouterr().out)
-    assert (report["total"], report["years"], report["requests"]) == (25, NY_SAMPLE["years"], summary["requests"] - 2)
+    assert (report["total"], report["years"], report["requests"]) == (25, NY_SAMPLE["years"], summary["requests"] - 3), "the run also made the two Census requests and the index's"
     assert nylaws.load(path)["items"] == NY_SAMPLE["items"]
     assert run("run", "--local", str(saved), "--ny-snapshot", str(path)) == 0
     capsys.readouterr()
@@ -99,6 +99,8 @@ def test_verify_exits_1_on_a_problem_and_card_repairs_the_card(tmp_path, offline
     (lambda monkeypatch: monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher({census.GOVT_UNITS_URL: Blocked("bot challenge at www2.census.gov/")})), "Blocked: bot challenge"),
     (lambda monkeypatch: monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher({census.ORG02_URL: Unavailable("HTTP 503 from www2.census.gov")})), "Unavailable: HTTP 503"),
     (lambda monkeypatch: monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher(ny=DownNYApi())), "Unavailable: HTTP 503 from locallaws.static-assets.ny.gov"),
+    (lambda monkeypatch: monkeypatch.setattr(nyindex, "SHA256", "0" * 64), f"SourceChanged: {nyindex.URL} has SHA-256"),
+    (lambda monkeypatch: monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher({nyindex.URL: Blocked("HTTP 403 from zenodo.org")})), "Blocked: HTTP 403 from zenodo.org"),
 ])
 def test_a_source_that_is_not_what_was_checked_stops_the_run_with_nothing_written(tmp_path, offline, monkeypatch, capsys, plant, stop):
     plant(monkeypatch)

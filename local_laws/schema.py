@@ -114,8 +114,41 @@ NY_LOCAL_LAW_DOCS = {
     "candidates": "When `match` is `ambiguous`, the `census_id` of each government with the title and name; otherwise empty",
 }
 
+NY_LOCAL_LAW_INDEX = pa.schema([
+    ("index_row", pa.int64()),
+    ("municipality_type", pa.string()),
+    ("municipality_name", pa.string()),
+    ("law_year", pa.int32()),
+    ("law_number", pa.string()),
+    ("date_filed", pa.date32()),
+    ("title", pa.string()),
+    ("subject", pa.string()),
+    ("pages", pa.int32()),
+    ("entry_date", pa.date32()),
+    ("census_id", pa.string()),
+    ("match", pa.string()),
+    ("candidates", pa.list_(pa.string())),
+])
+
+NY_LOCAL_LAW_INDEX_DOCS = {
+    "index_row": "The row's line in the release's `LocalLawsIndex.tsv`, counting from 1 after the header. Unique; the key to join on",
+    "municipality_type": "`Town`, `Village`, `City` or `County`, as the index records the filing government (`Municipality Type`), sometimes in other capitals (TOWN, town) and in a few rows blank or misplaced",
+    "municipality_name": "The filing government's name as the index records it (`Municipality Name`), such as Adams or Greenville (Greene Co); some names are cut short",
+    "law_year": "The year the local law is numbered in (`Year`); null where the index gives 0",
+    "law_number": "The law's number within its government's year (`Number of Law`), as text; null where blank",
+    "date_filed": "The date the index gives for the law's filing with the Secretary of State (`Filing Date`), kept as recorded even where it cannot be right; null where blank",
+    "title": "The law's title as the index records it (`Title`), such as peddlers and solicitors. Where the State's text breaks a line, the export writes ~, and so does this column; null where blank",
+    "subject": "The index's short subject heading (`Subject`), such as salary or freshwater wetlands; null where blank",
+    "pages": "The number of pages the index records for the law (`Pages`), 0 in some rows",
+    "entry_date": "The index's `Entry Date`, which the release does not define; its dates are later than most filing dates, so it is likely when the record was keyed in. Null where blank",
+    "census_id": "The filing government in `governments`, matched by name as `match` says; null when `match` is `ambiguous` or `unmatched`",
+    "match": "How `census_id` was found, one of the rules under New York local laws, applied to the type with only its first letter capitalized",
+    "candidates": "When `match` is `ambiguous`, the `census_id` of each government with the title and name; otherwise empty",
+}
+
 TABLES = {
     "governments": {"file": "data/governments.parquet", "schema": GOVERNMENTS, "docs": GOVERNMENT_DOCS},
     "locus_crosswalk": {"file": "data/locus_crosswalk.parquet", "schema": LOCUS_CROSSWALK, "docs": LOCUS_DOCS},
     "ny_local_laws": {"file": "data/ny_local_laws.parquet", "schema": NY_LOCAL_LAWS, "docs": NY_LOCAL_LAW_DOCS},
+    "ny_local_law_index": {"file": "data/ny_local_law_index.parquet", "schema": NY_LOCAL_LAW_INDEX, "docs": NY_LOCAL_LAW_INDEX_DOCS},
 }

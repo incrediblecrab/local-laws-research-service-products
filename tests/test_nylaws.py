@@ -239,3 +239,20 @@ def test_posting_counts_new_york_days_and_names_what_does_not_fit():
 def test_weekdays_after_counts_the_days_after_the_first_through_the_last():
     friday = datetime.date(2026, 9, 25)
     assert [nylaws.weekdays_after(friday, friday + datetime.timedelta(days=n)) for n in range(-1, 11)] == [0, 0, 0, 0, 1, 2, 3, 4, 5, 5, 5, 6]
+
+
+def test_rows_that_are_the_same_filing_as_another_are_counted_as_repeats_by_filing_year():
+    governments = [dict(row, population=100) for row in GOVERNMENTS]
+    table = nylaws.match([
+        filing("2002-05-01", "2024-10-01T15:00:00+00:00", filename="a.pdf"),
+        filing("2002-05-01", "2024-10-01T15:00:00+00:00", filename="b.pdf"),
+        filing("2002-05-01", "2024-10-01T15:00:00+00:00", name="Chester  (Warren County)", filename="c.pdf"),
+        filing("2002-05-01", "2024-10-01T15:00:00+00:00", number="2", filename="d.pdf"),
+        filing("2002-05-01", "2024-10-01T15:00:00+00:00", kind="Village", filename="e.pdf"),
+        filing("2002-05-02", "2024-10-01T15:00:00+00:00", filename="f.pdf"),
+        filing("2003-05-01", "2024-10-01T15:00:00+00:00", number=None, filename="g.pdf"),
+        filing("2003-05-01", "2024-10-01T15:00:00+00:00", number=None, filename="h.pdf"),
+    ], governments)
+    years = nylaws.stats(table, governments)["years"]
+    assert {year: entry["repeats"] for year, entry in years.items()} == {"2002": 2, "2003": 0}, "the name is compared in capitals with its spaces collapsed, and a row without a law number repeats nothing"
+    assert years["2002"] == {"filings": 6, "with_title": 0, "with_law_year": 0, "matched": 5, "repeats": 2}

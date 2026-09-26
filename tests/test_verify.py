@@ -6,8 +6,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from conftest import NY_SAMPLE, ORG02, FakeFetcher
-from local_laws import census, locus
+from conftest import NY_INDEX, NY_SAMPLE, ORG02, FakeFetcher, sha256
+from local_laws import census, locus, nyindex
 from local_laws.build import SORT_KEYS, manifest_text, summarize
 from local_laws.card import render
 from local_laws.census import SourceChanged
@@ -16,7 +16,7 @@ from local_laws.store import CARD, MANIFEST, sha256_file, write_parquet
 from local_laws.verify import verify
 
 GOVERNMENTS, CROSSWALK, NY = TABLES["governments"]["file"], TABLES["locus_crosswalk"]["file"], TABLES["ny_local_laws"]["file"]
-ROWS = {"governments": 50, "locus_crosswalk": 25, "ny_local_laws": NY_SAMPLE["total"]}
+ROWS = {"governments": 50, "locus_crosswalk": 25, "ny_local_laws": NY_SAMPLE["total"], "ny_local_law_index": 14}
 
 
 def check(store, stated=None, fetcher=True):
@@ -49,7 +49,7 @@ def reseal(store):
             manifest["files"][spec["file"]] = write_parquet(tables[name], store.root / spec["file"], spec["schema"], SORT_KEYS[name])
         manifest["sources"]["census_governments"]["rows"] = len(tables["governments"])
         try:
-            manifest["stats"] = json.loads(json.dumps(summarize(tables["governments"], tables["locus_crosswalk"], tables["ny_local_laws"])))
+            manifest["stats"] = json.loads(json.dumps(summarize(tables["governments"], tables["locus_crosswalk"], tables["ny_local_laws"], tables["ny_local_law_index"])))
         except KeyError:
             pass  # a government_type summarize has no column for; verify names it
 
@@ -64,7 +64,7 @@ def row(rows, **match):
 def test_a_clean_build_has_no_problems(published):
     store, manifest = published
     report = verify(store, fetcher=FakeFetcher(), stated_rows=lambda: manifest["sources"]["locus"]["rows"])
-    assert report == {"rows": ROWS, "org02_counts_compared": 312, "locus_stated_rows": manifest["sources"]["locus"]["rows"], "problems": []}
+    assert report == {"rows": ROWS, "org02_counts_compared": 312, "locus_stated_rows": manifest["sources"]["locus"]["rows"], "ny_index_state_records": 14, "problems": []}
 
 
 @pytest.mark.parametrize("edit, expected", [
@@ -130,6 +130,7 @@ def unmatched(rows):
     (lambda rows: matched(rows).update(candidates=["170895"]), "ny_local_laws: census_id, match and candidates disagree: 1 ("),
     (lambda rows: matched(rows).update(census_id="100001"), "ny_local_laws: census_id is not a New York government in governments: 1 ("),
     (lambda rows: matched(rows, "Town").update(census_id="109507"), "ny_local_laws: census_id's Census title is not the one municipality_type gives: 1 ("),
+    (lambda rows: row(rows, municipality_type="Town", municipality_name="BRIGHTON").update(census_id="170831", match="name"), "ny_local_laws: census_id, match and candidates are not what the matching rules give the row's type and name: 1 ("),
 ])
 def test_each_planted_ny_defect_is_named_even_in_a_consistent_manifest(published, edit, expected):
     store, _ = published
@@ -239,3 +240,40 @@ def test_a_changed_cg2200org02_stops_verify(published):
     store, _ = published
     with pytest.raises(SourceChanged, match="not the pinned"):
         verify(store, fetcher=FakeFetcher({census.ORG02_URL: ORG02 + b"x"}))
+
+
+def index_row(rows, number):
+    return next(r for r in rows if r["index_row"] == number)
+
+
+def swap_positions(rows):
+    first, second = index_row(rows, 2), index_row(rows, 3)
+    first["index_row"], second["index_row"] = 3, 2
+
+
+@pytest.mark.parametrize("edit, expected", [
+    (lambda rows: rows.append(dict(rows[0])), ["ny_local_law_index: index_row is not 1 to 15, once each; repeated: 1 (1)", "ny_local_law_index: 1 rows are not records in the State's LGSSLAWS, and 0 records are not rows"]),
+    (lambda rows: rows.pop(), ["ny_local_law_index: 13 rows; the manifest's source gives rows 14", "ny_local_law_index: 13 rows; the manifest's source gives state_records 14", "ny_local_law_index: export lines not in the table: 1 (14)"]),
+    (lambda rows: index_row(rows, 2).update(title="Partial tax exemption"), ["ny_local_law_index: rows that are not the release's export line at their index_row: 1 (2)"]),
+    (lambda rows: index_row(rows, 2).update(pages=2), ["ny_local_law_index: rows that are not the release's export line at their index_row: 1 (2)", "ny_local_law_index: 1 rows are not records in the State's LGSSLAWS, and 1 records are not rows"]),
+    (swap_positions, ["ny_local_law_index: rows that are not the release's export line at their index_row: 2 (2, 3)"]),
+    (lambda rows: index_row(rows, 2).update(match="guess"), ["ny_local_law_index: match values ['guess'] are not among"]),
+    (lambda rows: index_row(rows, 2).update(census_id=None), ["ny_local_law_index: census_id, match and candidates disagree: 1 (2)"]),
+    (lambda rows: index_row(rows, 7).update(census_id="170831", match="name"), ["ny_local_law_index: census_id, match and candidates are not what the matching rules give the row's type and name: 1 (7)"]),
+    (lambda rows: index_row(rows, 2).update(census_id="100001"), ["ny_local_law_index: census_id is not a New York government in governments: 1 (2)"]),
+    (lambda rows: index_row(rows, 5).update(census_id="109507"), ["ny_local_law_index: census_id's Census title is not the one municipality_type gives: 1 (5)"]),
+])
+def test_each_planted_index_defect_is_named_even_in_a_consistent_manifest(published, edit, expected):
+    store, _ = published
+    edit_table(store, "ny_local_law_index", edit)
+    reseal(store)
+    problems = check(store)
+    assert all(any(problem.startswith(start) for problem in problems) for start in expected), problems
+
+
+def test_a_changed_index_release_stops_verify_and_other_pins_are_named(published, monkeypatch):
+    store, _ = published
+    with pytest.raises(SourceChanged, match="not the pinned"):
+        verify(store, fetcher=FakeFetcher({nyindex.URL: NY_INDEX + b"x"}))
+    monkeypatch.setattr(nyindex, "SHA256", "d" * 64)
+    assert check(store, fetcher=False) == [f"the manifest's ny_local_law_index sha256 is '{sha256(NY_INDEX)}'; this code pins {'d' * 64}"]

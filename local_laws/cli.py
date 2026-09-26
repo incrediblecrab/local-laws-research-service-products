@@ -48,7 +48,8 @@ def cmd_run(args):
         manifest, files = build(fetcher, workdir, ny_snapshot=snapshot, code=code)
         stats = manifest["stats"]
         summary = {"governments": stats["governments"], "locus_jurisdictions": stats["locus"]["jurisdictions"], "matched": stats["locus"]["matched"],
-                   "ny_filings": stats["ny"]["filings"], "ny_matched": sum(stats["ny"]["matches"][name]["filings"] for name in nylaws.MATCHED), "requests": fetcher.requests}
+                   "ny_filings": stats["ny"]["filings"], "ny_matched": sum(stats["ny"]["matches"][name]["filings"] for name in nylaws.MATCHED),
+                   "ny_index_rows": stats["ny_index"]["rows"], "ny_index_matched": sum(stats["ny_index"]["matches"][name]["rows"] for name in nylaws.MATCHED), "requests": fetcher.requests}
         if unchanged(store, manifest):
             print(json.dumps(dict(summary, commit=None, unchanged=True), indent=1))
             return 0
@@ -141,8 +142,8 @@ def main(argv=None):
     run = add("run", cmd_run, "download the sources, check them, build the tables and commit them with the manifest and card")
     run.add_argument("--workdir", help="keep scratch files here (default: a temporary directory, deleted afterwards); LOCUS's download needs about 2 GB")
     run.add_argument("--ny-snapshot", help="build New York's table from a snapshot harvest-ny wrote, instead of reading the API again (about 1,500 requests)")
-    add("verify", cmd_verify, "check the published files against the manifest, each other, CG2200ORG02, LOCUS's card and the NY API's counts at the reading").add_argument(
-        "--offline", action="store_true", help="skip the two checks that download: CG2200ORG02 and LOCUS's card")
+    add("verify", cmd_verify, "check the published files against the manifest, each other, CG2200ORG02, LOCUS's card, the NY API's counts at the reading and the NY index's release").add_argument(
+        "--offline", action="store_true", help="skip the checks that download: CG2200ORG02, LOCUS's card and the NY index's release")
     add("card", cmd_card, "re-render README.md from the published manifest")
     harvest = commands.add_parser("harvest-ny", help="read New York's local-law filings from the Department of State's API into a snapshot file", allow_abbrev=False)
     harvest.add_argument("--out", required=True, help="where to write the snapshot (gzipped JSON)")

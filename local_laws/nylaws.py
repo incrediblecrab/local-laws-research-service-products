@@ -312,13 +312,13 @@ def match_one(by_name, counties, municipality_type, municipality_name):
     return None, "unmatched", []
 
 
-def match(table, governments):
-    """Adds census_id, match and candidates to each row, matching each distinct (municipality_type, municipality_name) once."""
+def match(table, governments, read_type=None):
+    """Adds census_id, match and candidates to each row, matching each distinct (municipality_type, municipality_name) once. read_type, if given, reads the type first."""
     by_name = index(governments)
     counties = {entry["county"] for entries in by_name.values() for entry in entries}
     cache = {}
     for row in table:
-        pair = (row["municipality_type"], row["municipality_name"])
+        pair = (row["municipality_type"] if read_type is None else read_type(row["municipality_type"]), row["municipality_name"])
         if pair not in cache:
             cache[pair] = match_one(by_name, counties, *pair)
         row["census_id"], row["match"], row["candidates"] = cache[pair]
@@ -357,6 +357,11 @@ def posting(table):
     }
 
 
+def filing(kind, name, number, filed):
+    """What makes two rows the same filing where the card compares them: type, name in capitals, law number and filing date."""
+    return kind, " ".join((name or "").upper().split()), number, filed
+
+
 def stats(table, governments):
     """The counts the card shows for the table. verify recomputes them from the published tables."""
     titles, places = {}, {}
@@ -369,6 +374,10 @@ def stats(table, governments):
     names = defaultdict(Counter)
     for row in table:
         names[row["match"]][(row["municipality_type"] or "", row["municipality_name"] or "")] += 1
+    # For each group of rows that are the same filing, the rows after its first, by filing year; a row without a law number is in no group.
+    repeats = Counter()
+    for (_, _, _, date), n in Counter(filing(row["municipality_type"], row["municipality_name"], row["law_number"], row["date_filed"]) for row in table if row["law_number"] is not None).items():
+        repeats[date.year] += n - 1
 
     def listed(match):
         return [[kind, name, n] for (kind, name), n in sorted(names[match].items(), key=lambda item: (-item[1], item[0]))]
@@ -384,7 +393,7 @@ def stats(table, governments):
         "filings": len(table),
         "first_filed": min(row["date_filed"] for row in table).isoformat(),
         "last_filed": max(row["date_filed"] for row in table).isoformat(),
-        "years": {str(year): tally(rows) for year, rows in sorted(by_year.items())},
+        "years": {str(year): tally(rows) | {"repeats": repeats[year]} for year, rows in sorted(by_year.items())},
         "municipality_types": {kind: tally(rows) for kind, rows in sorted(by_kind.items(), key=lambda item: (-len(item[1]), item[0]))},
         "matches": {match: {"filings": sum(names[match].values()), "names": len(names[match])} for match in MATCHES},
         "governments": {title: {"governments": n, "with_filings": filers[title]} for title, n in sorted(Counter(titles.values()).items())},

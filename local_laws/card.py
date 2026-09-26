@@ -3,7 +3,7 @@
 import datetime
 from collections import Counter
 
-from . import GITHUB, REPO_ID, census, locus, nylaws, precision
+from . import GITHUB, REPO_ID, census, locus, nyindex, nylaws, precision
 from .schema import TABLES
 
 TITLE = "US Local Governments and Ordinance Coverage"
@@ -99,6 +99,7 @@ def use():
         f'governments = load_dataset("{REPO_ID}", "governments", split="train")',
         f'crosswalk = load_dataset("{REPO_ID}", "locus_crosswalk", split="train")',
         f'ny_laws = load_dataset("{REPO_ID}", "ny_local_laws", split="train")',
+        f'ny_index = load_dataset("{REPO_ID}", "ny_local_law_index", split="train")',
         "```",
         "",
         "```sql",
@@ -126,6 +127,9 @@ def use():
         "",
         "-- Every local law the Town of Hempstead has filed, newest first, with the link to each filed PDF",
         f"SELECT date_filed, law_year, law_number, title, share_url FROM '{base}/ny_local_laws.parquet' WHERE census_id = '170895' ORDER BY date_filed DESC;",
+        "",
+        "-- Its oldest local laws in the State's older index",
+        f"SELECT law_year, law_number, date_filed, title FROM '{base}/ny_local_law_index.parquet' WHERE census_id = '170895' ORDER BY date_filed, index_row LIMIT 20;",
         "```",
         "",
     ]
@@ -133,13 +137,14 @@ def use():
 
 def files(manifest):
     entries = manifest["files"]
-    governments, crosswalk, ny = (entries[TABLES[name]["file"]] for name in ("governments", "locus_crosswalk", "ny_local_laws"))
+    governments, crosswalk, ny, index = (entries[TABLES[name]["file"]] for name in ("governments", "locus_crosswalk", "ny_local_laws", "ny_local_law_index"))
     return [
         "## Files",
         "",
         f"- `{TABLES['governments']['file']}`: one row per government, {governments['rows']:,} rows, sorted by `census_id`.",
         f"- `{TABLES['locus_crosswalk']['file']}`: one row per LOCUS jurisdiction, {crosswalk['rows']:,} rows, sorted by state, type and name.",
         f"- `{TABLES['ny_local_laws']['file']}`: one row per filing in New York's local-law search, {ny['rows']:,} rows, sorted by `filename`.",
+        f"- `{TABLES['ny_local_law_index']['file']}`: one row per record in New York's older index of local laws, {index['rows']:,} rows, sorted by `index_row`.",
         "- `manifest.json`: each source's URL and SHA-256 or commit (for New York's API, when it was read and the counts it gave then), each file's rows and SHA-256, every normalization the build applied with its count, the counts on this card, and the pipeline version and commit that built them.",
         "",
         "## Schema",
@@ -214,12 +219,14 @@ def new_york(manifest):
         *posting(ny["posting"]),
         "The filed PDFs are not read: the hosts that serve them tell robots not to (`Disallow: /` in their robots.txt), so each row keeps the public link the search page gives for its PDF, and the law's text stays there.",
         "",
-        "| Filed in | Filings | With a title | With a law year | Matched to a government |",
-        "|---|---:|---:|---:|---:|",
+        "| Filed in | Filings | With a title | With a law year | Matched to a government | Repeating another |",
+        "|---|---:|---:|---:|---:|---:|",
     ]
     for year, entry in ny["years"].items():
-        lines.append(f"| {year} | {entry['filings']:,} | {entry['with_title']:,} | {entry['with_law_year']:,} | {entry['matched']:,} |")
+        lines.append(f"| {year} | {entry['filings']:,} | {entry['with_title']:,} | {entry['with_law_year']:,} | {entry['matched']:,} | {entry['repeats']:,} |")
     lines += [
+        "",
+        repeated(ny),
         "",
         f"Each filing names its government by the Department's type (`municipality_type`) and name (`municipality_name`). The build matches the pair to one of New York's county, municipal and township governments in `governments`, only ever to a government with the Census title the type gives (TOWN OF for Town), so a filing is never matched to a same-name government of another type. {matched:,} of the {ny['filings']:,} filings ({share(matched, ny['filings'])}) are matched.",
         "",
@@ -237,10 +244,6 @@ def new_york(manifest):
     for title, entry in ny["governments"].items():
         lines.append(f"| {title} | {entry['governments']:,} | {entry['with_filings']:,} | {share(entry['with_filings'], entry['governments'])} |")
     lines += ["", without_filings(ny["without_filings"])]
-
-    def listed(entries):
-        return ", ".join(f"{kind or '(none)'} {name or '(none)'} ({n:,})" for kind, name, n in entries) or "none"
-
     lines += [
         "",
         f"Ambiguous, with the number of filings: {listed(ny['ambiguous'])}.",
@@ -249,6 +252,82 @@ def new_york(manifest):
         "",
     ]
     return lines
+
+
+def ny_index(manifest):
+    index, source = manifest["stats"]["ny_index"], manifest["sources"]["ny_local_law_index"]
+    matches, rows = index["matches"], index["rows"]
+    matched = sum(matches[name]["rows"] for name in nylaws.MATCHED)
+    lines = [
+        "## New York's index of older local laws",
+        "",
+        f"The Department's search begins in 1998, and its [manual]({NY_MANUAL}) says \"Local Laws filed prior to January 1, 1998 are not in the Local Laws Database. They are maintained in manual files.\" For older laws there is an index: under the Freedom of Information Law, the State released a copy of an index database of local laws filed with the Secretary of State, made with DataPerfect, on March 17, 2022 (FOIL Request No. DOS-22-02-052). The Local Geohistory Project published the release, with a tab-separated export of it, as [\"{nyindex.TITLE}\"](https://doi.org/{source['doi']}) ({nyindex.CREATOR}, v1.0.0), whose [README]({source['repository']}) describes \"index records for over 130,000 local laws filed with the Secretary of State, mostly between 1969 and 2003\".",
+        "",
+        f"`ny_local_law_index` is that export, {rows:,} rows, read from the release at the SHA-256 the build pins. The export is the project's own, made by running DataPerfect over the State's files and tidying its output, so the build checks it against the State's data file in the same release, whose header counts {source['state_records']:,} records: each record is one of the export's rows and each row one record, alike in the eight fields other than the title, with the State's text read as the export writes it, runs of spaces as one and ¨ as a. The State keeps the titles in another file, which the build does not read, so they are as the export gives them.",
+        "",
+        f"Law years run from {index['first_law_year']} to {index['last_law_year']}. {rows_were(index['filed_before_search'])} filed before 1998, when the search begins; of the {index['filed_from_search']:,} filed from 1998 on, {index['in_search']:,} ({share(index['in_search'], index['filed_from_search'])}) {'has' if index['in_search'] == 1 else 'have'} a row in `ny_local_laws` with the same type, name, law number and filing date. The index gives filing dates from {day(index['first_filed'])} to {day(index['last_filed'])}, and {index['undated']:,} {'row has' if index['undated'] == 1 else 'rows have'} none.{index_misdated(index)} Entry dates run from {day(index['first_entered'])} to {day(index['last_entered'])}, and {rows - index['with_title']:,} {'row has' if rows - index['with_title'] == 1 else 'rows have'} no title.",
+        "",
+        "| Law year | Rows | Matched to a government |",
+        "|---|---:|---:|",
+    ]
+    for decade, entry in index["law_years"].items():
+        lines.append(f"| {'(none)' if decade == 'none' else decade} | {entry['rows']:,} | {entry['matched']:,} |")
+    lines += [
+        "",
+        f"Rows are matched to governments by the rules under New York local laws, reading the type with only its first letter capitalized, since the index sometimes writes it otherwise, as TOWN or town. {matched:,} of the {rows:,} rows ({share(matched, rows)}) are matched.",
+        "",
+        "| `match` | Rows | Distinct names |",
+        "|---|---:|---:|",
+    ]
+    for name in nylaws.MATCHES:
+        lines.append(f"| `{name}` | {matches[name]['rows']:,} | {matches[name]['names']:,} |")
+    lines += ["", "| Type as the index writes it | Rows | Matched |", "|---|---:|---:|"]
+    for kind, entry in sorted(index["municipality_types"].items(), key=lambda item: (-item[1]["rows"], item[0])):
+        lines.append(f"| {kind or '(none)'} | {entry['rows']:,} | {entry['matched']:,} |")
+    lines += ["", "| Census title | Governments | With a matched row | Share |", "|---|---:|---:|---:|"]
+    for title, entry in index["governments"].items():
+        lines.append(f"| {title} | {entry['governments']:,} | {entry['with_rows']:,} | {share(entry['with_rows'], entry['governments'])} |")
+    lines += [
+        "",
+        f"Ambiguous, with the number of rows: {listed(index['ambiguous'])}.",
+        "",
+        f"Unmatched, with the number of rows: {listed(index['unmatched'])}.",
+        "",
+    ]
+    return lines
+
+
+def rows_were(n):
+    return f"{n:,} {'row was' if n == 1 else 'rows were'}"
+
+
+def index_misdated(index):
+    """A sentence, with its leading space, on the index's filing dates that disagree with its other fields; empty when there are none."""
+    before, after = index["filed_before_law_year"], index["filed_after_entry"]
+    if not before and not after:
+        return ""
+    return f" {before:,} {'row has' if before == 1 else 'rows have'} a filing date before the law's own year, so one of the two is wrong, and {after:,} a filing date after the day the record was entered; the table keeps the dates as recorded."
+
+
+def repeat_years(ny):
+    """(repeats by filing year, the one or two years with the most, and how much of the whole those hold: all, most or the largest shares)."""
+    years = {year: entry["repeats"] for year, entry in ny["years"].items() if entry["repeats"]}
+    top = [year for year, _ in sorted(years.items(), key=lambda item: (-item[1], item[0]))[:2]]
+    held, total = sum(years[year] for year in top), sum(years.values())
+    return years, top, "all" if held == total else "most" if 2 * held > total else "the largest shares"
+
+
+def repeated(ny):
+    """The sentence on rows that are the same filing as another by type, name, law number and filing date."""
+    years, top, portion = repeat_years(ny)
+    if not years:
+        return "No two rows have the same type, name, law number and filing date."
+    named = " and ".join(f"{year} ({years[year]:,} of its {ny['years'][year]['filings']:,} rows)" for year in top)
+    return f"Repeating another counts, of each set of rows with the same type, name, law number and filing date, the rows after the first: {sum(years.values()):,} in all, {portion} in {named}. Each is a separate PDF in the library, and the table keeps each as a row; whether a repeat is a second copy of one filing or another law under the same number is not known here, since the PDFs are not read."
+
+
+def listed(entries):
+    return ", ".join(f"{kind or '(none)'} {name or '(none)'} ({n:,})" for kind, name, n in entries) or "none"
 
 
 def titled(census_name):
@@ -390,14 +469,24 @@ def gaps(manifest):
         f"- {dormant:,} governments the Census marks dormant are rows, because the Census still counts them.",
         f"- Web addresses are as reported to the Census, which says it did minimal quality control on them; they are not checked here. {web:,} of the {stats['governments']:,} governments reported one. The Census file's mailing addresses and contact titles are left out: the map does not need them, and a few of the addresses name a person.",
         "- LOCUS's text is not here, and LOCUS names are matched to governments by name, with the precision described under Matching. Which governments' codes the codifiers hold is not known here; see Where local law is published.",
-        f"- `ny_local_laws` covers New York alone, and only its local laws. The Department's guide, [Adopting Local Laws in New York State]({NY_GUIDE}), notes that under the Municipal Home Rule Law a local law \"shall not include an ordinance, resolution or other similar act of the legislative body\", so those acts are not here. Nor are laws filed before the Department's database begins: its manual says \"Local Laws filed prior to January 1, 1998 are not in the Local Laws Database. They are maintained in manual files.\"",
+        f"- `ny_local_laws` covers New York alone, and only its local laws. The Department's guide, [Adopting Local Laws in New York State]({NY_GUIDE}), notes that under the Municipal Home Rule Law a local law \"shall not include an ordinance, resolution or other similar act of the legislative body\", so those acts are not here. Nor are laws filed before the Department's database begins: its manual says \"Local Laws filed prior to January 1, 1998 are not in the Local Laws Database. They are maintained in manual files.\" For those, `ny_local_law_index` has the State's older index, {stats['ny_index']['filed_before_search']:,} rows filed before 1998, without the laws' text.",
         f"- `ny_local_laws` is the search as it answered on {day(ny_source['finished_at'])}. A filing the Department had not yet added, or has removed or corrected since, is not reflected, and since filings took days to weeks to be added (see New York local laws), the weeks before then are incomplete.",
         f"- {NY_OUTSIDE}",
+        *repeats_gap(stats["ny"]),
         scans(),
+        "- `ny_local_law_index` is an index: it holds no law's text and no link to a filing, and its titles are not checked against the State's files (see New York's index of older local laws). Its names are as the index records them, some cut short or misspelled, and a village dissolved before 2022 has no government in the 2022 Census of Governments, so such rows are `unmatched`.",
         "- New York filings are matched to governments by the Department's type and name, and the county a name sometimes carries, not by their text; a check of a sample against the text is under New York local laws. A village dissolved before 2022 has no government in the 2022 Census of Governments, and a filing recorded under a name or type the Census does not use is `unmatched`; both are listed under New York local laws.",
         "",
     ]
     return lines
+
+
+def repeats_gap(ny):
+    years, top, portion = repeat_years(ny)
+    if not years:
+        return []
+    total = sum(years.values())
+    return [f"- {total:,} {'row' if total == 1 else 'rows'} of `ny_local_laws` {'has' if total == 1 else 'have'} the same type, name, law number and filing date as another row, {'filed in' if total == 1 else f'{portion} of them filed in'} {' and '.join(top)}; they may be second copies of the same filings, and are counted by year under New York local laws."]
 
 
 def scans():
@@ -410,7 +499,7 @@ def scans():
 
 
 def sources(manifest):
-    census_source, org02, locus_source, ny = (manifest["sources"][key] for key in ("census_governments", "census_org02", "locus", "ny_local_laws"))
+    census_source, org02, locus_source, ny, index = (manifest["sources"][key] for key in ("census_governments", "census_org02", "locus", "ny_local_laws", "ny_local_law_index"))
     return [
         "## Sources",
         "",
@@ -420,8 +509,9 @@ def sources(manifest):
         f"| [CG2200ORG02, Local Governments by Type and State, 2022]({org02['url']}) | SHA-256 `{org02['sha256']}` | Checking `governments`: {org02['counts_compared']:,} counts by state and type compared, {org02['mismatches']:,} differ |",
         f"| [LOCUS-v1]({LOCUS_URL}) | commit `{locus_source['revision']}` | `locus_crosswalk`: {locus_source['rows']:,} rows read |",
         f"| [New York Department of State, Local Laws search]({ny['app']}), through its API `{ny['api']}` | read from {moment(ny['started_at'])} to {moment(ny['finished_at'])}, when it counted {ny['total']:,} filings | `ny_local_laws` |",
+        f"| [{nyindex.TITLE}](https://doi.org/{index['doi']}), v1.0.0, from the Local Geohistory Project | SHA-256 `{index['sha256']}` | `ny_local_law_index`: {index['rows']:,} rows, checked against the {index['state_records']:,} records of the State's data file in the release |",
         "",
-        "`python -m local_laws run` downloads the Census files and LOCUS at their pinned versions and reads New York's API afresh, or builds from a snapshot of it that `python -m local_laws harvest-ny` wrote. It stops if any source's bytes or counts are not what the pipeline was checked against, and commits the tables, `manifest.json` and this card in one commit. It runs by hand, not on a schedule: the Census files and LOCUS are fixed releases, and a new release needs a person to review it before its pin changes. `python -m local_laws verify` re-reads the published files and checks them against `manifest.json`, the Census's table, LOCUS's card and the API's counts recorded at the reading.",
+        "`python -m local_laws run` downloads the Census files, LOCUS and New York's older index at their pinned versions and reads New York's API afresh, or builds from a snapshot of it that `python -m local_laws harvest-ny` wrote. It stops if any source's bytes or counts are not what the pipeline was checked against, and commits the tables, `manifest.json` and this card in one commit. It runs by hand, not on a schedule: the Census files, LOCUS and the index are fixed releases, and a new release needs a person to review it before its pin changes. `python -m local_laws verify` re-reads the published files and checks them against `manifest.json`, the Census's table, LOCUS's card, the API's counts recorded at the reading and the index's release.",
         "",
     ]
 
@@ -442,6 +532,7 @@ def license_section():
         "- The Census files are works of the United States Government and are not subject to copyright in the United States ([17 U.S.C. § 105](https://www.copyright.gov/title17/92chap1.html#105)).",
         f"- The crosswalk records facts about LOCUS-v1, namely its jurisdiction names, their row counts and counts of type words in their text, and holds none of its text. LOCUS licenses its text [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/), which anyone using that text must follow. Cite LOCUS as {LOCUS_CITATION}.",
         f"- `ny_local_laws` records facts about each filing, namely who filed it, its number, its dates, its PDF's name, size and public link, and the law's title as the Department records it, and holds none of the laws' text. Titles are among the \"words and short phrases such as names, titles, and slogans\" that the Copyright Office's rules list as not subject to copyright ([37 C.F.R. § 202.1(a)]({CFR_TITLES})). On September 26, 2026 the Department's Local Laws pages linked no terms of use, its [disclaimer]({NY_DISCLAIMER}) covered only its links to other sites, and the API's host had no robots.txt (it answered HTTP 404).",
+        f"- `ny_local_law_index` is the State's older index as the Local Geohistory Project published it, and the [Zenodo record]({nyindex.RECORD}) names its license \"Creative Commons Zero v1.0 Universal\" ([CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)). Its records are the State's: the release's [README]({nyindex.REPOSITORY}) says the DataPerfect files in it \"were created by the State of New York\". Like `ny_local_laws`, the table records facts about each filing, namely who filed it, the law's year and number, its dates and pages, and its title and subject as the State recorded them, and holds none of the laws' text. Cite it as {nyindex.CREATOR}, \"{nyindex.TITLE}\", v1.0.0, Local Geohistory Project, December 31, 2023, [doi:{nyindex.DOI}](https://doi.org/{nyindex.DOI}).",
         "",
     ]
 
@@ -453,10 +544,10 @@ def render(manifest):
     lines += [
         f"# {TITLE}",
         "",
-        f"Every local government the Census Bureau's 2022 Census of Governments counts, {stats['governments']:,} of them in the 50 states and the District of Columbia; which of them have ordinance text in [LOCUS]({LOCUS_URL}), a public corpus of local ordinances; and every local law in the New York Department of State's online search, {stats['ny']['filings']:,} filings, each matched where it can be to the government that filed it. It maps who makes local law, how much of that law LOCUS holds, and, for New York, the local laws its governments have filed with the state since 1998; the laws' text is not here.",
+        f"Every local government the Census Bureau's 2022 Census of Governments counts, {stats['governments']:,} of them in the 50 states and the District of Columbia; which of them have ordinance text in [LOCUS]({LOCUS_URL}), a public corpus of local ordinances; and every local law in the New York Department of State's online search, {stats['ny']['filings']:,} filings, with the State's older index of local laws, {stats['ny_index']['rows']:,} rows, each matched where it can be to the government that filed it. It maps who makes local law, how much of that law LOCUS holds, and, for New York, the local laws its governments have filed with the state since 1998 and, in the older index, with law years back to {stats['ny_index']['first_law_year']}; the laws' text is not here.",
         "",
-        f"Every row is built by code: the Census files and LOCUS from versions pinned by SHA-256 or commit, which the build checks against each other, and New York's filings from the Department's search API as it answered on {day(ny['finished_at'])}, checked against the API's own counts. The only hand-made input to the rows is {len(locus.ALIASES)} name aliases for LOCUS, listed under Matching. The pipeline and its tests are in [{GITHUB.removeprefix('https://')}]({GITHUB}), and this card is rendered from `manifest.json` in the same commit.",
+        f"Every row is built by code: the Census files, LOCUS and New York's older index from versions pinned by SHA-256 or commit, which the build checks against each other, and the index against the State's own file in its release; and New York's filings from the Department's search API as it answered on {day(ny['finished_at'])}, checked against the API's own counts. The only hand-made input to the rows is {len(locus.ALIASES)} name aliases for LOCUS, listed under Matching. The pipeline and its tests are in [{GITHUB.removeprefix('https://')}]({GITHUB}), and this card is rendered from `manifest.json` in the same commit.",
         "",
     ]
-    lines += coverage(stats) + new_york(manifest) + use() + files(manifest) + matching(manifest) + codifiers(manifest) + gaps(manifest) + sources(manifest) + license_section() + by_state(stats)
+    lines += coverage(stats) + new_york(manifest) + ny_index(manifest) + use() + files(manifest) + matching(manifest) + codifiers(manifest) + gaps(manifest) + sources(manifest) + license_section() + by_state(stats)
     return "\n".join(lines)

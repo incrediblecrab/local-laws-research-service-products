@@ -32,6 +32,7 @@ def test_front_matter_declares_each_config_and_the_license(published):
         {"config_name": "governments", "data_files": [{"split": "train", "path": "data/governments.parquet"}], "default": True},
         {"config_name": "locus_crosswalk", "data_files": [{"split": "train", "path": "data/locus_crosswalk.parquet"}]},
         {"config_name": "ny_local_laws", "data_files": [{"split": "train", "path": "data/ny_local_laws.parquet"}]},
+        {"config_name": "ny_local_law_index", "data_files": [{"split": "train", "path": "data/ny_local_law_index.parquet"}]},
     ]
 
 
@@ -184,3 +185,60 @@ def test_the_form_titles_sentence_follows_the_unnamed_answers(monkeypatch, publi
     card = render(manifest)
     assert "The matched name after a title that no government of that name has, such as COUNTY OF AMITYVILLE for the Village of Amityville, was found in none of the 50 filings checked." in card
     assert "more surely than" not in card
+
+
+def test_the_index_section_states_the_fixture_s_numbers(published):
+    manifest = published[1]
+    assert manifest["sources"]["ny_local_law_index"]["state_records"] == 14
+    card = render(manifest)
+    assert "`ny_local_law_index` is that export, 14 rows, read from the release at the SHA-256 the build pins." in card and "whose header counts 14 records:" in card
+    assert "Law years run from 1969 to 2002. 6 rows were filed before 1998, when the search begins; of the 5 filed from 1998 on, 2 (40.0%) have a row in `ny_local_laws` with the same type, name, law number and filing date. The index gives filing dates from April 16, 1900 to April 15, 2002, and 3 rows have none. 1 row has a filing date before the law's own year, so one of the two is wrong, and 0 a filing date after the day the record was entered; the table keeps the dates as recorded. Entry dates run from June 11, 1997 to December 5, 2018, and 3 rows have no title." in card
+    assert "| 1960s | 2 | 2 |\n| 1970s | 3 | 1 |\n| 1990s | 3 | 3 |\n| 2000s | 3 | 1 |\n| (none) | 3 | 0 |\n" in card
+    assert "7 of the 14 rows (50.0%) are matched." in card
+    assert "| Town | 4 | 3 |\n| City | 3 | 3 |\n| Village | 3 | 0 |\n| (none) | 2 | 0 |\n| Lacona | 1 | 0 |\n| TOWN | 1 | 1 |\n" in card
+    assert "| CITY OF | 1 | 1 | 100.0% |\n| TOWN OF | 2 | 2 | 100.0% |\n" in card
+    assert "Ambiguous, with the number of rows: none." in card
+    assert "Unmatched, with the number of rows: (none) (none) (1), (none) East Greenbush (1), Lacona Village (1), Town Charleston (1), Village Black River (1), Village Cornwall (1), Village South Nyack (1)." in card
+    assert "For those, `ny_local_law_index` has the State's older index, 6 rows filed before 1998, without the laws' text." in card
+    assert "with the State's older index of local laws, 14 rows, each matched where it can be" in card and "in the older index, with law years back to 1969;" in card
+    assert "`ny_local_law_index`: 14 rows, checked against the 14 records of the State's data file in the release |" in card
+
+
+def index_card(manifest, **stats):
+    manifest = copy.deepcopy(manifest)
+    manifest["stats"]["ny_index"].update(stats)
+    return render(manifest)
+
+
+def test_the_index_s_date_and_count_sentences_follow_its_counts(published):
+    manifest = published[1]
+    assert "a filing date before the law's own year" not in index_card(manifest, filed_before_law_year=0, filed_after_entry=0)
+    assert "15 rows have a filing date before the law's own year, so one of the two is wrong, and 9 a filing date after the day the record was entered;" in index_card(manifest, filed_before_law_year=15, filed_after_entry=9)
+    card = index_card(manifest, filed_before_search=1, in_search=1, undated=1, with_title=13)
+    assert "1 row was filed before 1998, when the search begins; of the 5 filed from 1998 on, 1 (20.0%) has a row" in card and "and 1 row has none." in card and "and 1 row has no title." in card
+    assert "Ambiguous, with the number of rows: Town Greenville (Orange C (64)." in index_card(manifest, ambiguous=[["Town", "Greenville (Orange C", 64]])
+
+
+def repeats(manifest, counts):
+    manifest = copy.deepcopy(manifest)
+    for year, n in counts.items():
+        manifest["stats"]["ny"]["years"][year]["repeats"] = n
+    return render(manifest)
+
+
+def test_repeated_filings_are_counted_with_the_years_that_hold_most_of_them(published):
+    manifest = published[1]
+    years = manifest["stats"]["ny"]["years"]
+    card = render(manifest)
+    assert "No two rows have the same type, name, law number and filing date." in card and "as another row" not in card
+    filings = {year: years[year]["filings"] for year in ("2003", "2024", "2025", "2026")}
+    card = repeats(manifest, {"2003": 1, "2025": 1, "2026": 1})
+    assert f"the rows after the first: 3 in all, most in 2003 (1 of its {filings['2003']} rows) and 2025 (1 of its {filings['2025']} rows)." in card
+    assert "- 3 rows of `ny_local_laws` have the same type, name, law number and filing date as another row, most of them filed in 2003 and 2025;" in card
+    assert re.search(r"\n\| 2026 \| [\d,]+ \| [\d,]+ \| [\d,]+ \| [\d,]+ \| 1 \|\n", card), "the table's column"
+    card = repeats(manifest, {"2003": 1, "2024": 1, "2025": 1, "2026": 1})
+    assert f"4 in all, the largest shares in 2003 (1 of its {filings['2003']} rows) and 2024 (1 of its {filings['2024']} rows)." in card and "as another row, the largest shares of them filed in 2003 and 2024;" in card
+    card = repeats(manifest, {"2003": 1, "2025": 2})
+    assert "3 in all, all in 2025 (2 of its" in card and "as another row, all of them filed in 2025 and 2003;" in card
+    card = repeats(manifest, {"2026": 1})
+    assert "1 in all, all in 2026 (1 of its" in card and "- 1 row of `ny_local_laws` has the same type, name, law number and filing date as another row, filed in 2026;" in card
