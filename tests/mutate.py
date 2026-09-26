@@ -25,6 +25,7 @@ MUTATIONS = [
     ("store.py", "landed commit never adopted", "                return head\n", "                return None\n"),
     ("store.py", "superseded store keeps calling", "        if self.superseded:\n            raise self.superseded\n", ""),
     ("verify.py", "crosswalk id not checked against governments", "row[\"census_id\"] not in government_ids", "False"),
+    ("verify.py", "crosswalk judged against a rejected table", "None if governments is None else {", "set() if governments is None else {"),
     ("verify.py", "card not compared", "if store.read_text(CARD) != card:", "if False:"),
     ("verify.py", "ORG02 mismatches dropped", "problems += [f\"CG2200ORG02: {mismatch}\" for mismatch in mismatches]", "pass"),
     ("verify.py", "pins not compared", "!= pin:", "!= pin and False:"),

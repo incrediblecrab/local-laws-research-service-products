@@ -12,7 +12,7 @@ from local_laws.build import SORT_KEYS, manifest_text, summarize
 from local_laws.card import render
 from local_laws.census import SourceChanged
 from local_laws.schema import TABLES
-from local_laws.store import CARD, MANIFEST, write_parquet
+from local_laws.store import CARD, MANIFEST, sha256_file, write_parquet
 from local_laws.verify import verify
 
 GOVERNMENTS, CROSSWALK = TABLES["governments"]["file"], TABLES["locus_crosswalk"]["file"]
@@ -159,6 +159,16 @@ def test_a_table_whose_schema_drifted_is_named(published):
     schema = pa.schema([field.with_type(pa.string()) if field.name == "population" else field for field in TABLES["governments"]["schema"]])
     pq.write_table(pa.Table.from_pylist([dict(r, population=str(r["population"])) for r in rows], schema=schema), store.root / GOVERNMENTS)
     assert any(problem.startswith("governments: schema ") and problem.endswith("is not the documented one") for problem in check(store))
+
+
+def test_an_extra_column_in_a_consistent_build_is_one_problem_not_one_per_crosswalk_row(published):
+    store, _ = published
+    table = store.read_table(GOVERNMENTS)
+    pq.write_table(table.append_column("mailing_city", pa.array(["X"] * table.num_rows, pa.string())), store.root / GOVERNMENTS)
+    edit_manifest(store, lambda manifest: manifest["files"][GOVERNMENTS].update(sha256=sha256_file(store.root / GOVERNMENTS), bytes=(store.root / GOVERNMENTS).stat().st_size))
+    (store.root / CARD).write_text(render(json.loads(store.read_text(MANIFEST))))
+    problems = check(store)
+    assert len(problems) == 1 and problems[0].startswith("governments: schema ") and "mailing_city" in problems[0], problems
 
 
 def test_an_undocumented_column_is_named(published, monkeypatch):

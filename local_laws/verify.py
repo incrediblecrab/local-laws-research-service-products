@@ -42,6 +42,7 @@ def check_governments(rows, problems):
 
 
 def check_crosswalk(rows, government_ids, problems):
+    """government_ids is None when the governments table was not read, so no census_id is judged against it."""
     keys = Counter((row["locus_state"], row["locus_jurisdiction_type"], row["locus_name"]) for row in rows)
     repeated = [f"{state}/{kind}/{name}" for (state, kind, name), n in keys.items() if n > 1]
     if repeated:
@@ -54,7 +55,7 @@ def check_crosswalk(rows, government_ids, problems):
         name = f"{row['locus_state']}/{row['locus_name']}"
         if (row["census_id"] is None) != (row["match"] in unmatched):
             problems.append(f"locus_crosswalk: {name} is {row['match']} with census_id {row['census_id']!r}")
-        if row["census_id"] is not None and row["census_id"] not in government_ids:
+        if government_ids is not None and row["census_id"] is not None and row["census_id"] not in government_ids:
             problems.append(f"locus_crosswalk: {name} names census_id {row['census_id']}, which is not in governments")
         if bool(row["candidates"]) != (row["match"] in locus.POOLED):
             problems.append(f"locus_crosswalk: {name} is {row['match']} with candidates {row['candidates']}")
@@ -127,7 +128,7 @@ def verify(store, fetcher=None, stated_rows=None):
             problems += [f"CG2200ORG02: {mismatch}" for mismatch in mismatches]
             report["org02_counts_compared"] = len(org02)
     if crosswalk is not None:
-        check_crosswalk(crosswalk, {row["census_id"] for row in governments or []}, problems)
+        check_crosswalk(crosswalk, None if governments is None else {row["census_id"] for row in governments}, problems)
         read = sum(row["locus_rows"] or 0 for row in crosswalk)
         if read != (sources.get("locus") or {}).get("rows"):
             problems.append(f"locus_crosswalk: {read:,} LOCUS rows, the manifest says {(sources.get('locus') or {}).get('rows')}")
