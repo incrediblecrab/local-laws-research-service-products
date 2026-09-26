@@ -6,8 +6,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from conftest import NY_INDEX, NY_SAMPLE, ORG02, TRIBES_NOTICE, TRIBES_PREVIOUS, FakeFetcher, sha256
-from local_laws import census, locus, nyindex, tribes
+from conftest import NFIP_CSV, NY_INDEX, NY_SAMPLE, ORG02, TRIBES_NOTICE, TRIBES_PREVIOUS, FakeFetcher, sha256
+from local_laws import census, locus, nfip, nyindex, tribes
 from local_laws.build import SORT_KEYS, manifest_text, summarize
 from local_laws.card import render
 from local_laws.census import SourceChanged
@@ -16,7 +16,7 @@ from local_laws.store import CARD, MANIFEST, sha256_file, write_parquet
 from local_laws.verify import verify
 
 GOVERNMENTS, CROSSWALK, NY = TABLES["governments"]["file"], TABLES["locus_crosswalk"]["file"], TABLES["ny_local_laws"]["file"]
-ROWS = {"governments": 50, "locus_crosswalk": 25, "ny_local_laws": NY_SAMPLE["total"], "ny_local_law_index": 14, "federally_recognized_tribes": 19}
+ROWS = {"governments": 50, "locus_crosswalk": 25, "ny_local_laws": NY_SAMPLE["total"], "ny_local_law_index": 14, "federally_recognized_tribes": 19, "nfip_communities": 25}
 
 
 def check(store, stated=None, fetcher=True):
@@ -64,7 +64,7 @@ def row(rows, **match):
 def test_a_clean_build_has_no_problems(published):
     store, manifest = published
     report = verify(store, fetcher=FakeFetcher(), stated_rows=lambda: manifest["sources"]["locus"]["rows"])
-    assert report == {"rows": ROWS, "org02_counts_compared": 312, "locus_stated_rows": manifest["sources"]["locus"]["rows"], "ny_index_state_records": 14, "tribes_notice_entries": 19, "problems": []}
+    assert report == {"rows": ROWS, "org02_counts_compared": 312, "locus_stated_rows": manifest["sources"]["locus"]["rows"], "ny_index_state_records": 14, "tribes_notice_entries": 19, "nfip_report": {"same_file": True, "rows": 25}, "problems": []}
 
 
 @pytest.mark.parametrize("edit, expected", [
@@ -334,3 +334,56 @@ def test_a_changed_notice_stops_verify_and_other_pins_are_named(published, monke
     monkeypatch.setitem(tribes.NOTICE, "sha256", "d" * 64)
     monkeypatch.setitem(tribes.PREVIOUS, "sha256", "c" * 64)
     assert check(store, fetcher=False) == [f"the manifest's {TRIBES} sha256 is '{sha256(TRIBES_NOTICE)}'; this code pins {'d' * 64}", f"the manifest's {TRIBES} previous_sha256 is '{sha256(TRIBES_PREVIOUS)}'; this code pins {'c' * 64}"]
+
+
+NFIP = "nfip_communities"
+
+
+def community(rows, cid):
+    return next(r for r in rows if r["cid"] == cid)
+
+
+@pytest.mark.parametrize("edit, expected", [
+    (lambda rows: rows.append(dict(community(rows, "010224"))), [f"{NFIP}: duplicate cid: 1 (010224)", f"{NFIP}: duplicate report_row: 1 (7)", f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'rows': (26, 25), 'participating': (21, 20), 'api in_report': (26, 25)}}"]),
+    (lambda rows: rows.remove(community(rows, "010224")), [f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'rows': (24, 25), 'participating': (19, 20), 'api in_report': (24, 25)}}", f"{NFIP}: communities in the report not in the table: 1 (010224)"]),
+    (lambda rows: community(rows, "010116").update(cid="01011"), [f"{NFIP}: cid null or not 6 digits: 1 ('01011')", f"{NFIP}: rows that are not the report's community at their cid: 1 (01011)", f"{NFIP}: communities in the report not in the table: 1 (010116)"]),
+    (lambda rows: community(rows, "010116").update(state="GA"), [f"{NFIP}: state is not the one whose FIPS code begins cid: 1 (010116)", f"{NFIP}: rows that are not the report's community at their cid: 1 (010116)"]),
+    (lambda rows: community(rows, "010224").update(participating=False), [f"{NFIP}: a date or note of entry for a community not participating, or of sanction for one participating: 1 (010224)", f"{NFIP}: communities not participating come before participating ones", f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'participating': (19, 20)}}", f"{NFIP}: rows that are not the report's community at their cid: 1 (010224)"]),
+    (lambda rows: community(rows, "010214").update(status_note="E"), [f"{NFIP}: a date or note of entry for a community not participating, or of sanction for one participating: 1 (010214)", f"{NFIP}: rows that are not the report's community at their cid: 1 (010214)"]),
+    (lambda rows: community(rows, "010095").update(report_row=1), [f"{NFIP}: communities not participating come before participating ones", f"{NFIP}: rows that are not the report's community at their cid: 1 (010095)"]),
+    (lambda rows: community(rows, "120425").update(notes=[]), [f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'with_notes': (9, 10)}}", f"{NFIP}: rows that are not the report's community at their cid: 1 (120425)"]),
+    (lambda rows: community(rows, "380146").update(current_map_date=None), [f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'after_retrieval': (5, 6)}}", f"{NFIP}: rows that are not the report's community at their cid: 1 (380146)"]),
+])
+def test_each_planted_nfip_defect_is_named_even_in_a_consistent_manifest(published, edit, expected):
+    store, _ = published
+    edit_table(store, NFIP, edit)
+    reseal(store)
+    problems = check(store)
+    assert all(any(problem.startswith(start) for problem in problems) for start in expected), problems
+
+
+def test_a_value_only_the_report_holds_is_caught_only_by_reading_the_report_again(published):
+    store, _ = published
+    edit_table(store, NFIP, lambda rows: community(rows, "010116").update(crs_class=6))
+    reseal(store)
+    assert check(store) == [f"{NFIP}: rows that are not the report's community at their cid: 1 (010116)"]
+    assert check(store, fetcher=False) == []
+
+
+def test_a_report_fema_has_since_regenerated_is_reported_not_a_problem(published):
+    store, manifest = published
+    report = verify(store, fetcher=FakeFetcher({nfip.CSV_URL: NFIP_CSV + b"\n"}), stated_rows=lambda: manifest["sources"]["locus"]["rows"])
+    assert (report["nfip_report"], report["problems"]) == ({"same_file": False}, [])
+
+
+@pytest.mark.parametrize("edit, expected", [
+    (lambda source: source.update(rows=24), f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'rows': (25, 24)}}"),
+    (lambda source: source["api"].update(in_report=24), f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'api in_report': (25, 24)}}"),
+    (lambda source: source["after_retrieval"].pop(2), f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'after_retrieval': (6, 5)}}"),
+    (lambda source: source.update(retrieved_at="2026-10-30T08:18:00Z"), f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'after_retrieval': (3, 6)}}"),
+])
+def test_nfip_counts_in_the_manifest_that_are_not_the_tables_are_named(published, edit, expected):
+    store, _ = published
+    edit_manifest(store, lambda manifest: edit(manifest["sources"][NFIP]))
+    (store.root / CARD).write_text(render(json.loads(store.read_text(MANIFEST))))
+    assert check(store) == [expected]

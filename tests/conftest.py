@@ -1,4 +1,4 @@
-"""Shared fixtures: the Census sample (real rows), a synthetic LOCUS (invented text; LOCUS's own is CC BY-NC), a sample of New York's local-law filings (real metadata) behind a fake of its API, a sample of New York's older index (real records, CC0), samples of the Bureau of Indian Affairs' two notices (real entries), a fake fetcher and a build published to a local store."""
+"""Shared fixtures: the Census sample (real rows), a synthetic LOCUS (invented text; LOCUS's own is CC BY-NC), a sample of New York's local-law filings (real metadata) behind a fake of its API, a sample of New York's older index (real records, CC0), samples of the Bureau of Indian Affairs' two notices (real entries), samples of FEMA's Community Status Book and of OpenFEMA's copy of it (real records), a fake fetcher and a build published to a local store."""
 
 import copy
 import hashlib
@@ -14,7 +14,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from local_laws import census, nyindex, nylaws, tribes
+from local_laws import census, nfip, nyindex, nylaws, tribes
 from local_laws.build import build
 from local_laws.store import LocalStore
 
@@ -25,6 +25,8 @@ NY_SAMPLE = json.loads((FIXTURES / "ny_snapshot_sample.json").read_text())
 NY_INDEX = (FIXTURES / "ny_index_sample.zip").read_bytes()
 TRIBES_NOTICE = (FIXTURES / "tribes_notice_sample.xml").read_bytes()
 TRIBES_PREVIOUS = (FIXTURES / "tribes_previous_sample.xml").read_bytes()
+NFIP_CSV = (FIXTURES / "nfip_nation_sample.csv").read_bytes()
+NFIP_API = (FIXTURES / "nfip_api_sample.parquet").read_bytes()
 BUILT_AT = "2026-09-25T00:00:00Z"
 CODE = {"version": "test", "commit": "0" * 40, "dirty": False}
 
@@ -123,6 +125,11 @@ def ny_snapshot():
     return copy.deepcopy(NY_SAMPLE)
 
 
+def nfip_snapshot():
+    """The NFIP samples as nfip.harvest returns them, read at fixed times."""
+    return {"csv": NFIP_CSV, "retrieved_at": "2026-09-26T08:18:00Z", "api": NFIP_API, "api_retrieved_at": "2026-09-26T08:23:00Z"}
+
+
 def api_item(kept):
     """An API search result carrying what nylaws.keep reads from one, and a signed download link it must leave out."""
     return {
@@ -171,10 +178,11 @@ class FakeNYApi:
 
 
 class FakeFetcher:
-    """Answers the two Census URLs, the New York index's and the two notices' with the fixtures and New York's API from a FakeNYApi; a value that is an exception is raised instead."""
+    """Answers the two Census URLs, the New York index's, the two notices' and FEMA's two with the fixtures and New York's API from a FakeNYApi; a value that is an exception is raised instead."""
 
     def __init__(self, responses=None, ny=None):
-        self.responses = {census.GOVT_UNITS_URL: UNITS, census.ORG02_URL: ORG02, nyindex.URL: NY_INDEX, tribes.NOTICE["url"]: TRIBES_NOTICE, tribes.PREVIOUS["url"]: TRIBES_PREVIOUS} | (responses or {})
+        self.responses = {census.GOVT_UNITS_URL: UNITS, census.ORG02_URL: ORG02, nyindex.URL: NY_INDEX, tribes.NOTICE["url"]: TRIBES_NOTICE, tribes.PREVIOUS["url"]: TRIBES_PREVIOUS,
+                          nfip.CSV_URL: NFIP_CSV, nfip.API_URL: NFIP_API} | (responses or {})
         self.ny = ny or FakeNYApi()
         self.requests = 0
 
@@ -219,7 +227,7 @@ def pins(monkeypatch):
 @pytest.fixture
 def published(tmp_path, pins):
     """A build of the fixtures committed to a local store: (store, manifest)."""
-    manifest, files = build(FakeFetcher(), tmp_path / "work", locus_download=fake_locus_download, ny_snapshot=ny_snapshot(), built_at=BUILT_AT, code=CODE)
+    manifest, files = build(FakeFetcher(), tmp_path / "work", locus_download=fake_locus_download, ny_snapshot=ny_snapshot(), nfip_snapshot=nfip_snapshot(), built_at=BUILT_AT, code=CODE)
     store = LocalStore(tmp_path / "hub")
     store.commit(files, "build")
     return store, manifest

@@ -1,12 +1,14 @@
-"""Checks a published build: its files against manifest.json, its tables against their schemas and each other, its counts against the Census's own table, LOCUS's card and the New York API's counts at the harvest, New York's index against its release, the Tribes against the Bureau of Indian Affairs' notices, and its card against a fresh render."""
+"""Checks a published build: its files against manifest.json, its tables against their schemas and each other, its counts against the Census's own table, LOCUS's card and the New York API's counts at the harvest, New York's index against its release, the Tribes against the Bureau of Indian Affairs' notices, the flood insurance communities against FEMA's report, and its card against a fresh render."""
 
+import datetime
+import hashlib
 import json
 import re
 from collections import Counter
 
 import pyarrow as pa
 
-from . import census, locus, nyindex, nylaws, tribes
+from . import census, locus, nfip, nyindex, nylaws, tribes
 from .build import summarize
 from .card import render
 from .schema import TABLES
@@ -208,8 +210,59 @@ def compare_tribes(rows, fetcher, source, problems):
     return len(fresh)
 
 
+def check_nfip(rows, source, problems):
+    """source is the manifest's record of FEMA's report and of its check against the OpenFEMA file."""
+    name = "nfip_communities"
+    cids = [row["cid"] for row in rows]
+    malformed = [cid for cid in cids if cid is None or not CENSUS_ID.fullmatch(cid)]
+    if malformed:
+        problems.append(f"{name}: cid null or not 6 digits: {sample(map(repr, malformed))}")
+    for field, values in (("cid", cids), ("report_row", [row["report_row"] for row in rows])):
+        repeated = [value for value, n in Counter(values).items() if value is not None and n > 1]
+        if repeated:
+            problems.append(f"{name}: duplicate {field}: {sample(repeated)}")
+    misplaced = [row["cid"] for row in rows if row["cid"] and (census.STATES.get(row["cid"][:2]) or nfip.TERRITORIES.get(row["cid"][:2])) != row["state"]]
+    if misplaced:
+        problems.append(f"{name}: state is not the one whose FIPS code begins cid: {sample(misplaced)}")
+    inconsistent = [row["cid"] for row in rows if (row["sanction_date"] if row["participating"] else row["program_entry_date"]) is not None
+                    or (row["status_note"] is not None and row["status_note"] not in nfip.STATUS_NOTES.get(row["participating"], ()))]
+    if inconsistent:
+        problems.append(f"{name}: a date or note of entry for a community not participating, or of sanction for one participating: {sample(inconsistent)}")
+    ordered = [row["participating"] for row in sorted(rows, key=lambda row: (row["report_row"] is None, row["report_row"] or 0))]
+    if ordered != sorted(ordered, reverse=True):
+        problems.append(f"{name}: communities not participating come before participating ones in report_row order, unlike the report's two parts")
+    counts = {"rows": len(rows), "participating": sum(1 for row in rows if row["participating"]), "with_notes": sum(1 for row in rows if row["notes"])}
+    differing = {field: (value, source.get(field)) for field, value in counts.items() if source.get(field) != value}
+    api = source.get("api") or {}
+    if api.get("in_report") != len(rows):
+        differing["api in_report"] = (len(rows), api.get("in_report"))
+    try:
+        after = nfip.after(rows, datetime.date.fromisoformat(str(source.get("retrieved_at"))[:10]))
+    except (TypeError, ValueError):
+        after = None
+    if after != source.get("after_retrieval"):
+        differing["after_retrieval"] = (None if after is None else len(after), len(source.get("after_retrieval") or []))
+    if differing:
+        problems.append(f"{name}: the table and the manifest's source disagree, (table, manifest): {differing}")
+
+
+def compare_nfip(rows, fetcher, source, problems):
+    """The published rows against FEMA's report read again: when it is still the file the build read, every row field for field. FEMA regenerates the report, so a different file is reported, not a problem."""
+    data = fetcher.get(nfip.CSV_URL)
+    if hashlib.sha256(data).hexdigest() != source.get("sha256"):
+        return {"same_file": False}
+    expected = {row["cid"]: row for row in nfip.rows(data)}
+    changed = [row["cid"] for row in rows if row != expected.get(row["cid"])]
+    if changed:
+        problems.append(f"nfip_communities: rows that are not the report's community at their cid: {sample(changed)}")
+    missing = sorted(set(expected) - {row["cid"] for row in rows})
+    if missing:
+        problems.append(f"nfip_communities: communities in the report not in the table: {sample(missing)}")
+    return {"same_file": True, "rows": len(expected)}
+
+
 def verify(store, fetcher=None, stated_rows=None):
-    """A report whose "problems" is empty when every check passed. With a fetcher, CG2200ORG02, New York's index and the Bureau of Indian Affairs' two notices are downloaded again and compared; with stated_rows (a callable), LOCUS's card is read again."""
+    """A report whose "problems" is empty when every check passed. With a fetcher, CG2200ORG02, New York's index, the Bureau of Indian Affairs' two notices and FEMA's report are downloaded again and compared; with stated_rows (a callable), LOCUS's card is read again."""
     text = store.read_text(MANIFEST)
     if text is None:
         return {"problems": [f"no {MANIFEST}"]}
@@ -291,9 +344,14 @@ def verify(store, fetcher=None, stated_rows=None):
         check_tribes(recognized, sources.get("federally_recognized_tribes") or {}, problems)
         if fetcher is not None:
             report["tribes_notice_entries"] = compare_tribes(recognized, fetcher, sources.get("federally_recognized_tribes") or {}, problems)
-    if governments is not None and crosswalk is not None and ny is not None and index is not None and recognized is not None:
+    communities = tables.get("nfip_communities")
+    if communities is not None:
+        check_nfip(communities, sources.get("nfip_communities") or {}, problems)
+        if fetcher is not None:
+            report["nfip_report"] = compare_nfip(communities, fetcher, sources.get("nfip_communities") or {}, problems)
+    if governments is not None and crosswalk is not None and ny is not None and index is not None and recognized is not None and communities is not None:
         try:
-            stats = json.loads(json.dumps(summarize(governments, crosswalk, ny, index, recognized)))
+            stats = json.loads(json.dumps(summarize(governments, crosswalk, ny, index, recognized, communities)))
         except (KeyError, TypeError) as error:
             problems.append(f"the manifest's stats cannot be recomputed from the tables: {type(error).__name__}: {error}")
         else:

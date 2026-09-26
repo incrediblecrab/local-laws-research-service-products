@@ -7,7 +7,7 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 
-from . import __version__, census, locus, nyindex, nylaws, schema, tribes
+from . import __version__, census, locus, nfip, nyindex, nylaws, schema, tribes
 from .card import render
 from .census import SourceChanged
 from .store import CARD, MANIFEST, write_parquet
@@ -19,6 +19,7 @@ SORT_KEYS = {
     "ny_local_laws": lambda row: (row["filename"], row["asset_id"]),
     "ny_local_law_index": lambda row: row["index_row"],
     "federally_recognized_tribes": lambda row: row["list_row"],
+    "nfip_communities": lambda row: row["report_row"],
 }
 # Manifest keys that change with every build even when nothing they describe does; a build that differs from the published one only in these is not committed.
 VOLATILE = ("built_at", "code")
@@ -39,7 +40,7 @@ def code_version():
     return {"version": __version__, "commit": commit, "dirty": None if status is None else bool(status)}
 
 
-def summarize(governments, crosswalk, ny, index, recognized):
+def summarize(governments, crosswalk, ny, index, recognized, communities):
     """The counts the card shows. verify recomputes them from the published tables, so they are only ever what the data holds."""
     matched = {row["census_id"] for row in crosswalk if row["census_id"]}
     types = {}
@@ -93,6 +94,7 @@ def summarize(governments, crosswalk, ny, index, recognized):
         "ny": nylaws.stats(ny, governments),
         "ny_index": nyindex.stats(index, governments, ny),
         "tribes": tribes.stats(recognized),
+        "nfip": nfip.stats(communities),
     }
 
 
@@ -105,9 +107,9 @@ def fetch_census(fetcher):
     return units, org02
 
 
-def build(fetcher, workdir, locus_download=None, ny_snapshot=None, built_at=None, code=None):
+def build(fetcher, workdir, locus_download=None, ny_snapshot=None, nfip_snapshot=None, built_at=None, code=None):
     """Downloads and checks every source and writes the files for one commit into workdir/stage. Returns (manifest, files), files mapping repo paths to local files.
-    Raises SourceChanged, and writes nothing, if a source is not the one pinned or the sources disagree. locus_download defaults to locus.download; ny_snapshot, a snapshot from nylaws.harvest, to a new harvest."""
+    Raises SourceChanged, and writes nothing, if a source is not the one pinned or the sources disagree. locus_download defaults to locus.download; ny_snapshot, a snapshot from nylaws.harvest, and nfip_snapshot, one from nfip.harvest, to a new harvest."""
     units_zip, org02_zip = fetch_census(fetcher)
     governments, notes = census.parse_units(census.zip_member(units_zip, census.GOVT_UNITS_MEMBER))
     org02 = census.parse_org02(census.zip_member(org02_zip, census.ORG02_MEMBER))
@@ -128,9 +130,12 @@ def build(fetcher, workdir, locus_download=None, ny_snapshot=None, built_at=None
     index, state_records = nyindex.read(nyindex.download(fetcher))
     index = nyindex.match(index, governments)
     notice, previous, recognized = tribes.load(fetcher)
+    flood = nfip_snapshot if nfip_snapshot is not None else nfip.harvest(fetcher)
+    communities = nfip.rows(flood["csv"])
+    reconciled = nfip.reconcile(communities, flood["api"])
     stage = Path(workdir) / "stage"
     files, entries = {}, {}
-    for name, rows in (("governments", governments), ("locus_crosswalk", crosswalk), ("ny_local_laws", ny), ("ny_local_law_index", index), ("federally_recognized_tribes", recognized)):
+    for name, rows in (("governments", governments), ("locus_crosswalk", crosswalk), ("ny_local_laws", ny), ("ny_local_law_index", index), ("federally_recognized_tribes", recognized), ("nfip_communities", communities)):
         spec = schema.TABLES[name]
         local = stage / spec["file"]
         entries[spec["file"]] = write_parquet(rows, local, spec["schema"], SORT_KEYS[name])
@@ -146,9 +151,10 @@ def build(fetcher, workdir, locus_download=None, ny_snapshot=None, built_at=None
             "ny_local_law_index": {"doi": nyindex.DOI, "record": nyindex.RECORD, "url": nyindex.URL, "sha256": nyindex.SHA256, "repository": nyindex.REPOSITORY, "commit": nyindex.COMMIT,
                                    "license": nyindex.LICENSE, "rows": len(index), "state_records": state_records},
             "federally_recognized_tribes": tribes.source(notice, previous, recognized),
+            "nfip_communities": nfip.source(flood, communities, reconciled),
         },
         "files": entries,
-        "stats": summarize(governments, crosswalk, ny, index, recognized),
+        "stats": summarize(governments, crosswalk, ny, index, recognized, communities),
     }
     files[MANIFEST] = stage / MANIFEST
     files[MANIFEST].write_text(manifest_text(manifest))

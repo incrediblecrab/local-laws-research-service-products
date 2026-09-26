@@ -6,7 +6,7 @@ import re
 
 import yaml
 
-from local_laws import locus, precision, tribes
+from local_laws import locus, nfip, precision, tribes
 from local_laws.build import manifest_text
 from local_laws.card import NY_OUTSIDE, render
 from local_laws.schema import TABLES
@@ -34,6 +34,7 @@ def test_front_matter_declares_each_config_and_the_license(published):
         {"config_name": "ny_local_laws", "data_files": [{"split": "train", "path": "data/ny_local_laws.parquet"}]},
         {"config_name": "ny_local_law_index", "data_files": [{"split": "train", "path": "data/ny_local_law_index.parquet"}]},
         {"config_name": "federally_recognized_tribes", "data_files": [{"split": "train", "path": "data/federally_recognized_tribes.parquet"}]},
+        {"config_name": "nfip_communities", "data_files": [{"split": "train", "path": "data/nfip_communities.parquet"}]},
     ]
 
 
@@ -297,3 +298,50 @@ def test_what_the_notice_says_is_quoted_only_for_the_notice_it_was_read_from(pub
     card = tribes_card(published[1], {"document_number": "2027-00001"})
     assert tribes.NOTICE_SAYS not in card and "Lumbee Tribe of North Carolina. `previous_entry` holds each row's earlier entry.\n" in card
     assert "- `federally_recognized_tribes` is the Bureau's list as its notice of January 30, 2026 gives it: a Tribe recognized" in card and "the latest the Federal Register's API found" not in card
+
+
+def test_the_flood_section_states_the_fixture_s_numbers(published):
+    card = render(published[1])
+    assert f"FEMA's page for its [Community Status Book](https://www.fema.gov/flood-insurance/work-with-nfip/community-status-book) says: \"{nfip.PROGRAM_SAYS}\" `nfip_communities` is the book's national report, [nation.csv](https://www.fema.gov/cis/nation.csv), as fema.gov served it on September 26, 2026, 08:18 UTC: one row per community, 25 in all, 20 participating in the program and 5 not, in the report's order. Of those participating, 18 are in its Regular Program and 1 in its Emergency Program; the report gives no program for 1. The report marks 3 communities as tribal, 1 of them participating." in card
+    assert "with the notes the report prints beneath 10 communities. The table records which communities have joined and when, not the regulations they adopted" in card
+    assert "read from `https://www.fema.gov/api/open/v1/NfipCommunityStatusBook.parquet` on September 26, 2026, 08:23 UTC: every community in the report must be in it once, under the same name and state and with the same participation, or the build stops. The API holds 28 communities, 3 more than the report lists, 1 of them participating and 2 not; they are not rows. The report's other values, its counties, tribal marks, dates, codes and classes, agree with the API's for every community except `crs_discount` for 1 community (350045, null here and 5 in the API) and `initial_firm_date` for 1 community (025009, 1969-06-25 here and 2069-06-25 in the API)." in card
+    assert f"The Community Rating System, the page says, is \"{nfip.CRS_SAYS}\". 5 communities have a class in it" in card
+    assert "| Class | Communities | Discount |\n|---:|---:|---:|\n| 1 | 1 | 45% |\n| 5 | 1 | 25% |\n| 7 | 2 | 15% |\n| 10 | 1 | none |\n" in card, "classes in number order, 10 last"
+    assert "6 dates are later than the day the report was read: 3 in `current_map_date`, 1 in `crs_effective_date`, 1 in `initial_firm_date`, 1 in `sanction_date`. The report marks 1 of the current map dates as after the date of the report (`>`); the rest it gives without comment. 1 is more than five years ahead: WILLIAMS COUNTY* (380146), whose `current_map_date` reads as January 2, 2050. The report writes years with two digits, which the table reads as 1968 to 2067." in card
+    assert "and `nfip_communities` the 25 communities in FEMA's Community Status Book, 20 of which participate in the National Flood Insurance Program" in card
+    assert "- `data/nfip_communities.parquet`: one row per community in FEMA's Community Status Book, 25 rows, sorted by `report_row`." in card
+    assert "- `nfip_communities` is FEMA's report as fema.gov served it on September 26, 2026; FEMA regenerates it, so a community's standing may have changed since." in card and "The 3 communities that OpenFEMA's copy holds and the report does not list are not rows." in card
+    assert "| read on September 26, 2026, 08:18 UTC; SHA-256 `eccd1a8778d861e28b2d80b4e984c99ab8bfb1d12cd0609e8d57427b2bd37029` | `nfip_communities`: 25 rows |" in card
+    assert "| read on September 26, 2026, 08:23 UTC; SHA-256 `e09b393fe7fdf364294b9305b2c5e95974188a649cd123f59f3c28579fde9dbc` | Checking `nfip_communities`: its 28 records, every community in the report among them |" in card
+    assert f"FEMA's [website information](https://www.fema.gov/about/website-information) says: \"{nfip.REUSE_SAYS}\"" in card and f"OpenFEMA's [terms](https://www.fema.gov/about/openfema/terms-conditions) ask its users to state: \"{nfip.OPENFEMA_STATEMENT}\"" in card
+
+
+def nfip_card(manifest, source=None, api=None, **stats):
+    manifest = copy.deepcopy(manifest)
+    manifest["stats"]["nfip"].update(stats)
+    manifest["sources"]["nfip_communities"].update(source or {})
+    manifest["sources"]["nfip_communities"]["api"].update(api or {})
+    return render(manifest)
+
+
+def test_the_openfema_sentence_follows_what_differed(published):
+    card = nfip_card(published[1], api={"differ": {}})
+    assert "they are not rows. The report's other values, its counties, tribal marks, dates, codes and classes, agree with the API's for every community.\n" in card
+    cases = [[f"0100{n:02}", n, None] for n in range(7)]
+    card = nfip_card(published[1], api={"differ": {"crs_class": cases}})
+    assert "agree with the API's for every community except `crs_class` for 7 communities (010000, 0 here and null in the API; 010001, 1 here and null in the API; 010002, 2 here and null in the API; 010003, 3 here and null in the API; 010004, 4 here and null in the API; ...)." in card
+
+
+def test_the_later_dates_paragraph_follows_the_dates(published):
+    manifest = published[1]
+    card = nfip_card(manifest, {"after_retrieval": []})
+    assert "later than the day the report was read" not in card and "| 10 | 1 | none |\n\n## " in card
+    near = [each for each in manifest["sources"]["nfip_communities"]["after_retrieval"] if each[0] != "380146"]
+    card = nfip_card(manifest, {"after_retrieval": near})
+    assert "5 dates are later than the day the report was read: 2 in `current_map_date`" in card and "the rest it gives without comment.\n" in card and "five years ahead" not in card
+
+
+def test_communities_without_a_program_are_mentioned_only_when_there_are_some(published):
+    manifest = published[1]
+    card = nfip_card(manifest, programs={"Regular": 19, "Emergency": 1, "none": 0})
+    assert "Of those participating, 19 are in its Regular Program and 1 in its Emergency Program. The report marks" in card

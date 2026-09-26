@@ -3,7 +3,7 @@
 import datetime
 from collections import Counter
 
-from . import GITHUB, REPO_ID, census, locus, nyindex, nylaws, precision, tribes
+from . import GITHUB, REPO_ID, census, locus, nfip, nyindex, nylaws, precision, tribes
 from .schema import TABLES
 
 TITLE = "US Local Governments and Ordinance Coverage"
@@ -49,7 +49,7 @@ def moment(value):
 
 def front_matter(total):
     lines = ["---", f"pretty_name: {TITLE}", "license: mit", "language:", "- en",
-             "tags:", "- legal", "- government", "- local-government", "- ordinances", "- municipal-codes", "- local-laws", "- new-york", "- census", "- tribes", "- united-states",
+             "tags:", "- legal", "- government", "- local-government", "- ordinances", "- municipal-codes", "- local-laws", "- new-york", "- census", "- tribes", "- flood-insurance", "- fema", "- united-states",
              "size_categories:", f"- {size_category(total)}", "configs:"]
     for index, (name, spec) in enumerate(TABLES.items()):
         lines += [f"- config_name: {name}", "  data_files:", "  - split: train", f"    path: {spec['file']}"]
@@ -102,6 +102,7 @@ def use():
         f'ny_laws = load_dataset("{REPO_ID}", "ny_local_laws", split="train")',
         f'ny_index = load_dataset("{REPO_ID}", "ny_local_law_index", split="train")',
         f'tribes = load_dataset("{REPO_ID}", "federally_recognized_tribes", split="train")',
+        f'flood = load_dataset("{REPO_ID}", "nfip_communities", split="train")',
         "```",
         "",
         "```sql",
@@ -142,12 +143,20 @@ def use():
         f"SELECT name, previous_entry FROM '{base}/federally_recognized_tribes.parquet' WHERE previous_entry IS NULL OR replace(lower(previous_entry), ' ', '') <> replace(lower(entry), ' ', '') ORDER BY list_row;",
         "```",
         "",
+        "```sql",
+        "-- The communities in Louisiana that do not participate in the National Flood Insurance Program, with the date of each one's sanction",
+        f"SELECT cid, community_name, county, sanction_date, status_note FROM '{base}/nfip_communities.parquet' WHERE state = 'LA' AND NOT participating ORDER BY community_name;",
+        "",
+        "-- Participating communities by state, and how many have a class in the Community Rating System",
+        f"SELECT state, count(*) FILTER (WHERE participating) AS participating, count(*) FILTER (WHERE NOT participating) AS not_participating, count(crs_class) AS in_crs FROM '{base}/nfip_communities.parquet' GROUP BY state ORDER BY state;",
+        "```",
+        "",
     ]
 
 
 def files(manifest):
     entries = manifest["files"]
-    governments, crosswalk, ny, index, recognized = (entries[TABLES[name]["file"]] for name in ("governments", "locus_crosswalk", "ny_local_laws", "ny_local_law_index", "federally_recognized_tribes"))
+    governments, crosswalk, ny, index, recognized, flood = (entries[TABLES[name]["file"]] for name in ("governments", "locus_crosswalk", "ny_local_laws", "ny_local_law_index", "federally_recognized_tribes", "nfip_communities"))
     return [
         "## Files",
         "",
@@ -156,7 +165,8 @@ def files(manifest):
         f"- `{TABLES['ny_local_laws']['file']}`: one row per filing in New York's local-law search, {ny['rows']:,} rows, sorted by `filename`.",
         f"- `{TABLES['ny_local_law_index']['file']}`: one row per record in New York's older index of local laws, {index['rows']:,} rows, sorted by `index_row`.",
         f"- `{TABLES['federally_recognized_tribes']['file']}`: one row per entry of the Bureau of Indian Affairs' list of federally recognized Tribes, {recognized['rows']:,} rows, sorted by `list_row`.",
-        "- `manifest.json`: each source's URL and SHA-256 or commit (for New York's API, when it was read and the counts it gave then), each file's rows and SHA-256, every normalization the build applied with its count, the counts on this card, and the pipeline version and commit that built them.",
+        f"- `{TABLES['nfip_communities']['file']}`: one row per community in FEMA's Community Status Book, {flood['rows']:,} rows, sorted by `report_row`.",
+        "- `manifest.json`: each source's URL and SHA-256 or commit (for New York's API and FEMA's report, when each was read, with the counts New York's API gave then and the OpenFEMA check's results), each file's rows and SHA-256, every normalization the build applied with its count, the counts on this card, and the pipeline version and commit that built them.",
         "",
         "## Schema",
         "",
@@ -338,6 +348,60 @@ def recognized_tribes(manifest):
         f"Changed since the earlier notice: {', '.join(changed) or 'none'}.",
         "",
         *respaced(respaced_names),
+    ]
+
+
+def flood_communities(manifest):
+    table, source = manifest["stats"]["nfip"], manifest["sources"]["nfip_communities"]
+    api, programs = source["api"], table["programs"]
+    only = api["only_in_api"]
+    unset = f"; the report gives no program for {programs['none']:,}" if programs["none"] else ""
+    return [
+        "## Flood insurance communities",
+        "",
+        f"FEMA's page for its [Community Status Book]({source['page']}) says: \"{nfip.PROGRAM_SAYS}\" `nfip_communities` is the book's national report, [nation.csv]({source['url']}), as fema.gov served it on {moment(source['retrieved_at'])}: one row per community, {table['rows']:,} in all, {table['participating']:,} participating in the program and {table['not_participating']:,} not, in the report's order. Of those participating, {programs['Regular']:,} are in its Regular Program and {programs['Emergency']:,} in its Emergency Program{unset}. The report marks {table['tribal']:,} communities as tribal, {table['tribal_participating']:,} of them participating. Each row gives the dates of the community's first flood maps and of its current map, the date it entered the program or was sanctioned, and its class in the Community Rating System, with the notes the report prints beneath {table['with_notes']:,} communities. The table records which communities have joined and when, not the regulations they adopted: that text is not here, and the communities are not matched to `governments`.",
+        "",
+        f"The build checks the report against the book as FEMA's OpenFEMA API publishes it, the dataset [{api['name']}]({api['page']}), read from `{api['url']}` on {moment(api['retrieved_at'])}: every community in the report must be in it once, under the same name and state and with the same participation, or the build stops. The API holds {api['rows']:,} communities, {only['participating'] + only['not_participating']:,} more than the report lists, {only['participating']:,} of them participating and {only['not_participating']:,} not; they are not rows. {api_agreement(api['differ'])}",
+        "",
+        f"The Community Rating System, the page says, is \"{nfip.CRS_SAYS}\". {table['crs']:,} communities have a class in it, with the discount on flood insurance premiums the report gives for each class:",
+        "",
+        "| Class | Communities | Discount |",
+        "|---:|---:|---:|",
+        *(f"| {n} | {entry['communities']:,} | {', '.join(f'{value}%' for value in entry['discounts']) or 'none'} |" for n, entry in sorted(table["crs_classes"].items(), key=lambda item: int(item[0]))),
+        "",
+        *later_dates(source),
+    ]
+
+
+def api_agreement(differ):
+    """The sentence on the report's values that the OpenFEMA file gives otherwise."""
+    if not differ:
+        return "The report's other values, its counties, tribal marks, dates, codes and classes, agree with the API's for every community."
+
+    def shown(value):
+        return "null" if value is None else str(value)
+
+    parts = []
+    for field, cases in differ.items():
+        listed = "; ".join(f"{cid}, {shown(ours)} here and {shown(theirs)} in the API" for cid, ours, theirs in cases[:5])
+        parts.append(f"`{field}` for {len(cases):,} {'community' if len(cases) == 1 else 'communities'} ({listed}{'; ...' if len(cases) > 5 else ''})")
+    return f"The report's other values, its counties, tribal marks, dates, codes and classes, agree with the API's for every community except {' and '.join(parts)}."
+
+
+def later_dates(source):
+    """The paragraph on the dates later than the day the report was read, if any."""
+    after = source["after_retrieval"]
+    if not after:
+        return []
+    read = datetime.date.fromisoformat(source["retrieved_at"][:10])
+    columns = Counter(column for _, _, column, _, _ in after)
+    marked = sum(1 for *_, note in after if note == ">")
+    far = [(cid, name, column, value) for cid, name, column, value, _ in after if datetime.date.fromisoformat(value).year > read.year + 5]
+    distant = "; ".join(f"{name} ({cid}), whose `{column}` reads as {day(value)}" for cid, name, column, value in far)
+    return [
+        f"{len(after):,} dates are later than the day the report was read: " + ", ".join(f"{count:,} in `{column}`" for column, count in columns.most_common()) + f". The report marks {marked:,} of the current map dates as after the date of the report (`>`); the rest it gives without comment."
+        + (f" {len(far):,} {'is' if len(far) == 1 else 'are'} more than five years ahead: {distant}. The report writes years with two digits, which the table reads as 1968 to 2067." if far else ""),
+        "",
     ]
 
 
@@ -532,6 +596,7 @@ def gaps(manifest):
         *repeats_gap(stats["ny"]),
         scans(),
         tribes_gap(manifest["sources"]["federally_recognized_tribes"]),
+        nfip_gap(manifest["sources"]["nfip_communities"]),
         "- `ny_local_law_index` is an index: it holds no law's text and no link to a filing, and its titles are not checked against the State's files (see New York's index of older local laws). Its names are as the index records them, some cut short or misspelled, and a village dissolved before 2022 has no government in the 2022 Census of Governments, so such rows are `unmatched`.",
         "- New York filings are matched to governments by the Department's type and name, and the county a name sometimes carries, not by their text; a check of a sample against the text is under New York local laws. A village dissolved before 2022 has no government in the 2022 Census of Governments, and a filing recorded under a name or type the Census does not use is `unmatched`; both are listed under New York local laws.",
         "",
@@ -542,6 +607,11 @@ def gaps(manifest):
 def tribes_gap(source):
     latest = f", the latest the Federal Register's API found on {day(tribes.LATEST_CHECKED)}" if source["document_number"] == tribes.NOTICE["document_number"] else ""
     return f"- `federally_recognized_tribes` is the Bureau's list as its notice of {day(source['published'])} gives it{latest}: a Tribe recognized, or an entry corrected, since then is not reflected."
+
+
+def nfip_gap(source):
+    only = source["api"]["only_in_api"]
+    return f"- `nfip_communities` is FEMA's report as fema.gov served it on {day(source['retrieved_at'])}; FEMA regenerates it, so a community's standing may have changed since. It says which communities participate in the National Flood Insurance Program, not what their floodplain regulations say, and its names, such as ALAMOGORDO, CITY OF, are FEMA's and are not matched to `governments`. The {only['participating'] + only['not_participating']:,} communities that OpenFEMA's copy holds and the report does not list are not rows."
 
 
 def repeats_gap(ny):
@@ -562,7 +632,7 @@ def scans():
 
 
 def sources(manifest):
-    census_source, org02, locus_source, ny, index, recognized = (manifest["sources"][key] for key in ("census_governments", "census_org02", "locus", "ny_local_laws", "ny_local_law_index", "federally_recognized_tribes"))
+    census_source, org02, locus_source, ny, index, recognized, flood = (manifest["sources"][key] for key in ("census_governments", "census_org02", "locus", "ny_local_laws", "ny_local_law_index", "federally_recognized_tribes", "nfip_communities"))
     return [
         "## Sources",
         "",
@@ -575,8 +645,10 @@ def sources(manifest):
         f"| [{nyindex.TITLE}](https://doi.org/{index['doi']}), v1.0.0, from the Local Geohistory Project | SHA-256 `{index['sha256']}` | `ny_local_law_index`: {index['rows']:,} rows, checked against the {index['state_records']:,} records of the State's data file in the release |",
         f"| Bureau of Indian Affairs, [\"{tribes.TITLE}\"]({recognized['page']}), {recognized['citation']}, {day(recognized['published'])} | SHA-256 `{recognized['sha256']}` of its XML | `federally_recognized_tribes`: {recognized['rows']:,} rows |",
         f"| The notice it updates, [{recognized['previous_citation']}]({recognized['previous_page']}), {day(recognized['previous_published'])} | SHA-256 `{recognized['previous_sha256']}` of its XML | Checking `federally_recognized_tribes`: its {recognized['previous_entries']:,} entries, each continued by one row |",
+        f"| FEMA, [Community Status Book]({flood['page']}), its national report [nation.csv]({flood['url']}) | read on {moment(flood['retrieved_at'])}; SHA-256 `{flood['sha256']}` | `nfip_communities`: {flood['rows']:,} rows |",
+        f"| FEMA, OpenFEMA dataset [{flood['api']['name']}]({flood['api']['page']}), `{flood['api']['url']}` | read on {moment(flood['api']['retrieved_at'])}; SHA-256 `{flood['api']['sha256']}` | Checking `nfip_communities`: its {flood['api']['rows']:,} records, every community in the report among them |",
         "",
-        "`python -m local_laws run` downloads the Census files, LOCUS, New York's older index and the Bureau's two notices at their pinned versions and reads New York's API afresh, or builds from a snapshot of it that `python -m local_laws harvest-ny` wrote. It stops if any source's bytes or counts are not what the pipeline was checked against, and commits the tables, `manifest.json` and this card in one commit. It runs by hand, not on a schedule: the Census files, LOCUS, the index and the notices are fixed releases, and a new release needs a person to review it before its pin changes. `python -m local_laws verify` re-reads the published files and checks them against `manifest.json`, the Census's table, LOCUS's card, the API's counts recorded at the reading, the index's release and the Bureau's notices.",
+        "`python -m local_laws run` downloads the Census files, LOCUS, New York's older index and the Bureau's two notices at their pinned versions and reads New York's API and FEMA's report afresh, or builds from snapshots of them that `python -m local_laws harvest-ny` and `harvest-nfip` wrote. It stops if any source's bytes or counts are not what the pipeline was checked against, and commits the tables, `manifest.json` and this card in one commit. It runs by hand, not on a schedule: the Census files, LOCUS, the index and the notices are fixed releases, and a new release needs a person to review it before its pin changes. `python -m local_laws verify` re-reads the published files and checks them against `manifest.json`, the Census's table, LOCUS's card, the API's counts recorded at the reading, the index's release, the Bureau's notices and FEMA's report, row for row while fema.gov still serves the file the build read.",
         "",
     ]
 
@@ -589,7 +661,7 @@ def by_state(stats):
 
 
 def license_section(manifest):
-    tribe_source = manifest["sources"]["federally_recognized_tribes"]
+    tribe_source, flood = manifest["sources"]["federally_recognized_tribes"], manifest["sources"]["nfip_communities"]
     return [
         "## License",
         "",
@@ -600,6 +672,7 @@ def license_section(manifest):
         f"- `ny_local_laws` records facts about each filing, namely who filed it, its number, its dates, its PDF's name, size and public link, and the law's title as the Department records it, and holds none of the laws' text. Titles are among the \"words and short phrases such as names, titles, and slogans\" that the Copyright Office's rules list as not subject to copyright ([37 C.F.R. § 202.1(a)]({CFR_TITLES})). On September 26, 2026 the Department's Local Laws pages linked no terms of use, its [disclaimer]({NY_DISCLAIMER}) covered only its links to other sites, and the API's host had no robots.txt (it answered HTTP 404).",
         f"- `ny_local_law_index` is the State's older index as the Local Geohistory Project published it, and the [Zenodo record]({nyindex.RECORD}) names its license \"Creative Commons Zero v1.0 Universal\" ([CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)). Its records are the State's: the release's [README]({nyindex.REPOSITORY}) says the DataPerfect files in it \"were created by the State of New York\". Like `ny_local_laws`, the table records facts about each filing, namely who filed it, the law's year and number, its dates and pages, and its title and subject as the State recorded them, and holds none of the laws' text. Cite it as {nyindex.CREATOR}, \"{nyindex.TITLE}\", v1.0.0, Local Geohistory Project, December 31, 2023, [doi:{nyindex.DOI}](https://doi.org/{nyindex.DOI}).",
         f"- `federally_recognized_tribes` is taken from notices the Bureau of Indian Affairs published in the Federal Register, each signed by its Assistant Secretary—Indian Affairs. They are works of the United States Government, and \"Copyright protection under this title is not available for any work of the United States Government\" ([17 U.S.C. § 105]({USC_105})). Cite the list as Bureau of Indian Affairs, \"{tribes.TITLE}\", {tribe_source['citation']} ({day(tribe_source['published'])}).",
+        f"- `nfip_communities` is read from FEMA's Community Status Book on fema.gov, a work of the United States Government ([17 U.S.C. § 105]({USC_105})), and FEMA's [website information]({nfip.REUSE}) says: \"{nfip.REUSE_SAYS}\" Cite it as FEMA, National Flood Insurance Program Community Status Book, {flood['url']}, read on {moment(flood['retrieved_at'])}. The rows are the report's; the build only checks them against OpenFEMA's copy, read on {moment(flood['api']['retrieved_at'])} from `{flood['api']['url']}`, and OpenFEMA's [terms]({nfip.API_TERMS}) ask its users to state: \"{nfip.OPENFEMA_STATEMENT}\"",
         "",
     ]
 
@@ -611,10 +684,10 @@ def render(manifest):
     lines += [
         f"# {TITLE}",
         "",
-        f"Every local government the Census Bureau's 2022 Census of Governments counts, {stats['governments']:,} of them in the 50 states and the District of Columbia; which of them have ordinance text in [LOCUS]({LOCUS_URL}), a public corpus of local ordinances; and every local law in the New York Department of State's online search, {stats['ny']['filings']:,} filings, with the State's older index of local laws, {stats['ny_index']['rows']:,} rows, each matched where it can be to the government that filed it. It maps who makes local law, how much of that law LOCUS holds, and, for New York, the local laws its governments have filed with the state since 1998 and, in the older index, with law years back to {stats['ny_index']['first_law_year']}; the laws' text is not here. Beside them, `federally_recognized_tribes` lists the {stats['tribes']['rows']:,} entries of the Bureau of Indian Affairs' list of federally recognized Tribes, whose governments the Census does not count among local governments.",
+        f"Every local government the Census Bureau's 2022 Census of Governments counts, {stats['governments']:,} of them in the 50 states and the District of Columbia; which of them have ordinance text in [LOCUS]({LOCUS_URL}), a public corpus of local ordinances; and every local law in the New York Department of State's online search, {stats['ny']['filings']:,} filings, with the State's older index of local laws, {stats['ny_index']['rows']:,} rows, each matched where it can be to the government that filed it. It maps who makes local law, how much of that law LOCUS holds, and, for New York, the local laws its governments have filed with the state since 1998 and, in the older index, with law years back to {stats['ny_index']['first_law_year']}; the laws' text is not here. Beside them, `federally_recognized_tribes` lists the {stats['tribes']['rows']:,} entries of the Bureau of Indian Affairs' list of federally recognized Tribes, whose governments the Census does not count among local governments, and `nfip_communities` the {stats['nfip']['rows']:,} communities in FEMA's Community Status Book, {stats['nfip']['participating']:,} of which participate in the National Flood Insurance Program, whose communities agree to adopt floodplain management regulations.",
         "",
-        f"Every row is built by code: the Census files, LOCUS and New York's older index from versions pinned by SHA-256 or commit, which the build checks against each other, and the index against the State's own file in its release; the Bureau's list from its notice in the Federal Register, pinned by SHA-256 and checked against the notice it updates; and New York's filings from the Department's search API as it answered on {day(ny['finished_at'])}, checked against the API's own counts. The only hand-made input to the rows is {len(locus.ALIASES)} name aliases for LOCUS, listed under Matching. The pipeline and its tests are in [{GITHUB.removeprefix('https://')}]({GITHUB}), and this card is rendered from `manifest.json` in the same commit.",
+        f"Every row is built by code: the Census files, LOCUS and New York's older index from versions pinned by SHA-256 or commit, which the build checks against each other, and the index against the State's own file in its release; the Bureau's list from its notice in the Federal Register, pinned by SHA-256 and checked against the notice it updates; New York's filings from the Department's search API as it answered on {day(ny['finished_at'])}, checked against the API's own counts; and the flood insurance communities from FEMA's report as fema.gov served it on {day(manifest['sources']['nfip_communities']['retrieved_at'])}, checked against OpenFEMA's copy of the book. The only hand-made input to the rows is {len(locus.ALIASES)} name aliases for LOCUS, listed under Matching. The pipeline and its tests are in [{GITHUB.removeprefix('https://')}]({GITHUB}), and this card is rendered from `manifest.json` in the same commit.",
         "",
     ]
-    lines += coverage(stats) + new_york(manifest) + ny_index(manifest) + recognized_tribes(manifest) + use() + files(manifest) + matching(manifest) + codifiers(manifest) + gaps(manifest) + sources(manifest) + license_section(manifest) + by_state(stats)
+    lines += coverage(stats) + new_york(manifest) + ny_index(manifest) + recognized_tribes(manifest) + flood_communities(manifest) + use() + files(manifest) + matching(manifest) + codifiers(manifest) + gaps(manifest) + sources(manifest) + license_section(manifest) + by_state(stats)
     return "\n".join(lines)

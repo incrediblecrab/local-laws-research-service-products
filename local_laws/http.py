@@ -9,6 +9,8 @@ from . import GITHUB, __version__
 
 USER_AGENT = f"local-laws-research-service-products/{__version__} (+{GITHUB})"
 INTERVAL = 1.0
+# Hosts whose robots.txt asks for a longer wait between requests than INTERVAL: www.fema.gov gives "Crawl-delay: 15" for every user agent.
+HOST_INTERVALS = {"www.fema.gov": 15.0}
 RETRYABLE = (408, 429, 500, 502, 503, 504)
 
 
@@ -32,7 +34,7 @@ class Fetcher:
     def _pace(self, host):
         now = time.monotonic()
         at = max(now, self._next_at.get(host, 0.0))
-        self._next_at[host] = at + self.interval
+        self._next_at[host] = at + max(self.interval, HOST_INTERVALS.get(host, 0.0))
         if at > now:
             self.sleep(at - now)
 

@@ -73,3 +73,12 @@ def test_requests_to_one_host_are_paced_and_other_hosts_are_not_held_up():
     assert slept == []
     client.get("https://a.example/2")
     assert len(slept) == 1 and 4.5 < slept[0] <= 5
+
+
+def test_a_host_whose_robots_txt_asks_for_a_longer_crawl_delay_gets_it():
+    client, slept = fetcher(lambda request: httpx.Response(200), interval=1)
+    client.get("https://www.fema.gov/cis/nation.csv")
+    client.get("https://www.fema.gov/api/open/v1/NfipCommunityStatusBook.parquet")
+    client.get("https://a.example/1")
+    client.get("https://a.example/2")
+    assert len(slept) == 2 and 14.5 < slept[0] <= 15 and slept[1] <= 1
