@@ -1,8 +1,9 @@
 """Renders the dataset card (README.md on the Hub) from the manifest alone, so it is committed with every manifest and never disagrees with it."""
 
+import datetime
 from collections import Counter
 
-from . import GITHUB, REPO_ID, census, locus
+from . import GITHUB, REPO_ID, census, locus, nylaws, precision
 from .schema import TABLES
 
 TITLE = "US Local Governments and Ordinance Coverage"
@@ -13,6 +14,15 @@ TYPE_NAMES = {"county": "County", "municipal": "Municipal", "township": "Townshi
 TECH_DOC = "https://www2.census.gov/programs-surveys/gus/datasets/2022/2022_gov_org_meth_tech_doc.pdf"
 HOWARD_ESTIMATES = "https://www2.census.gov/programs-surveys/popest/datasets/2020-2024/cities/totals/sub-est2024.csv"
 ICC_RELEASE = "https://www.iccsafe.org/about/periodicals-and-newsroom/industry-leaders-american-legal-publishing-and-general-code-unite-to-provide-communities-with-best-in-class-codification-services/"
+NY_FILING = "https://dos.ny.gov/local-law-filing"
+NY_MANUAL = "https://dos.ny.gov/system/files/documents/2018/09/local-laws-website-manual.pdf"
+NY_GUIDE = "https://dos.ny.gov/system/files/documents/2026/02/adopting-local-laws-in-nys.pdf"
+NY_FORM = "https://dos.ny.gov/system/files/documents/2025/04/0239-f_0.pdf"
+NY_DISCLAIMER = "https://dos.ny.gov/disclaimer"
+# Read by paging through the API's filings filed in 2020 on September 26, 2026, when the whole API counted 147,844 assets and the category 147,795.
+NY_OUTSIDE = "On September 26, 2026 the API also held 49 filings outside the search's Local Laws category, which the search does not show and which are not rows: filed from December 23 to 29, 2020 and all added on October 16, 2024, among them New York City's local laws 120 to 125 of 2020 and Suffolk County's 51 to 56. One, the Town of Stony Creek's local law 3 of 2020, is also in the category, filed again under a shorter title; for the other 48, no filing in the category from 2020 or 2021 has the same government, number and a like title."
+CFR_TITLES = "https://www.govinfo.gov/content/pkg/CFR-2025-title37-vol1/xml/CFR-2025-title37-vol1-sec202-1.xml"
+NY_TITLES = {"TOWN OF": "Town", "VILLAGE OF": "Village", "CITY OF": "City", "COUNTY OF": "County"}
 
 
 def size_category(rows):
@@ -26,9 +36,19 @@ def share(part, whole):
     return f"{part / whole:.1%}" if whole else "n/a"
 
 
+def day(value):
+    """September 26, 2026 for 2026-09-26 or 2026-09-26T04:27:00Z."""
+    date = datetime.date.fromisoformat(value[:10])
+    return f"{date:%B} {date.day}, {date.year}"
+
+
+def moment(value):
+    return f"{day(value)}, {value[11:16]} UTC"
+
+
 def front_matter(total):
     lines = ["---", f"pretty_name: {TITLE}", "license: mit", "language:", "- en",
-             "tags:", "- legal", "- government", "- local-government", "- ordinances", "- municipal-codes", "- census", "- united-states",
+             "tags:", "- legal", "- government", "- local-government", "- ordinances", "- municipal-codes", "- local-laws", "- new-york", "- census", "- united-states",
              "size_categories:", f"- {size_category(total)}", "configs:"]
     for index, (name, spec) in enumerate(TABLES.items()):
         lines += [f"- config_name: {name}", "  data_files:", "  - split: train", f"    path: {spec['file']}"]
@@ -78,6 +98,7 @@ def use():
         "",
         f'governments = load_dataset("{REPO_ID}", "governments", split="train")',
         f'crosswalk = load_dataset("{REPO_ID}", "locus_crosswalk", split="train")',
+        f'ny_laws = load_dataset("{REPO_ID}", "ny_local_laws", split="train")',
         "```",
         "",
         "```sql",
@@ -95,18 +116,31 @@ def use():
         f"SELECT header, topic FROM 'hf://datasets/{locus.REPO_ID}@{locus.REVISION}/data/*.parquet' WHERE state = 'vt' AND source_jurisdiction_type = 'cities' AND city = 'barre' LIMIT 20;",
         "```",
         "",
+        "```sql",
+        "-- The New York governments that filed the most local laws in 2025",
+        "SELECT g.name, g.county_name, count(*) AS filings",
+        f"FROM '{base}/ny_local_laws.parquet' AS l",
+        f"JOIN '{base}/governments.parquet' AS g USING (census_id)",
+        "WHERE year(l.date_filed) = 2025",
+        "GROUP BY ALL ORDER BY filings DESC LIMIT 20;",
+        "",
+        "-- Every local law the Town of Hempstead has filed, newest first, with the link to each filed PDF",
+        f"SELECT date_filed, law_year, law_number, title, share_url FROM '{base}/ny_local_laws.parquet' WHERE census_id = '170895' ORDER BY date_filed DESC;",
+        "```",
+        "",
     ]
 
 
 def files(manifest):
     entries = manifest["files"]
-    governments, crosswalk = (entries[TABLES[name]["file"]] for name in ("governments", "locus_crosswalk"))
+    governments, crosswalk, ny = (entries[TABLES[name]["file"]] for name in ("governments", "locus_crosswalk", "ny_local_laws"))
     return [
         "## Files",
         "",
         f"- `{TABLES['governments']['file']}`: one row per government, {governments['rows']:,} rows, sorted by `census_id`.",
         f"- `{TABLES['locus_crosswalk']['file']}`: one row per LOCUS jurisdiction, {crosswalk['rows']:,} rows, sorted by state, type and name.",
-        "- `manifest.json`: each source's URL and SHA-256 or commit, each file's rows and SHA-256, every normalization the build applied with its count, the counts on this card, and the pipeline version and commit that built them.",
+        f"- `{TABLES['ny_local_laws']['file']}`: one row per filing in New York's local-law search, {ny['rows']:,} rows, sorted by `filename`.",
+        "- `manifest.json`: each source's URL and SHA-256 or commit (for New York's API, when it was read and the counts it gave then), each file's rows and SHA-256, every normalization the build applied with its count, the counts on this card, and the pipeline version and commit that built them.",
         "",
         "## Schema",
         "",
@@ -161,6 +195,151 @@ def matching(manifest):
     return lines + [""]
 
 
+def new_york(manifest):
+    ny, source = manifest["stats"]["ny"], manifest["sources"]["ny_local_laws"]
+    matches, kinds = ny["matches"], ny["municipality_types"]
+    matched = sum(matches[name]["filings"] for name in nylaws.MATCHED)
+    early = sum(entry["filings"] for year, entry in ny["years"].items() if int(year) < 1998)
+    titled = sum(entry["with_title"] for entry in ny["years"].values())
+    numbered = sum(entry["with_law_year"] for entry in ny["years"].values())
+    lines = [
+        "## New York local laws",
+        "",
+        f"New York's counties, cities, towns and villages each adopt local laws, and the Department of State's [Local Law Filing]({NY_FILING}) page, under Municipal Home Rule Law §27, says: \"Each local law shall be filed with the Secretary of State within 20 days after its final adoption or approval. A local law does not become effective until it is filed in the Office of the Secretary of State.\" The Department publishes the filings in its [Local Laws search]({source['app']}), whose [manual]({NY_MANUAL}) says the database holds local laws \"on or after January 1, 1998 by counties, cities, towns and villages\" and \"county codes filed on or after April 1, 2015 by counties\".",
+        "",
+        f"`ny_local_laws` holds every filing the search's API returned from {moment(source['started_at'])} to {moment(source['finished_at'])}: {ny['filings']:,} filings, filed from {day(ny['first_filed'])} to {day(ny['last_filed'])}. The build reads the category one filing year at a time and stops unless each year's rows are as many as the API counts for that year and the whole is what it counts before and after the reading; `verify` checks the published table against those counts, recorded in `manifest.json`. {codifications(ny['codifications'])}, and {early:,} {'carries' if early == 1 else 'carry'} a filing date before 1998.",
+        "",
+        f"The metadata is the Department's. {titled:,} filings ({share(titled, ny['filings'])}) have a title and {numbered:,} ({share(numbered, ny['filings'])}) a law year; the rest name the government, the law's number and the filing date. The Department says the number it assigns a local law \"may be different from the number ascribed by the legislative body of the local government\" ([Local Law Filing]({NY_FILING})).{misdated(ny['filed_after_posted'])}",
+        "",
+        *posting(ny["posting"]),
+        "The filed PDFs are not read: the hosts that serve them tell robots not to (`Disallow: /` in their robots.txt), so each row keeps the public link the search page gives for its PDF, and the law's text stays there.",
+        "",
+        "| Filed in | Filings | With a title | With a law year | Matched to a government |",
+        "|---|---:|---:|---:|---:|",
+    ]
+    for year, entry in ny["years"].items():
+        lines.append(f"| {year} | {entry['filings']:,} | {entry['with_title']:,} | {entry['with_law_year']:,} | {entry['matched']:,} |")
+    lines += [
+        "",
+        f"Each filing names its government by the Department's type (`municipality_type`) and name (`municipality_name`). The build matches the pair to one of New York's county, municipal and township governments in `governments`, only ever to a government with the Census title the type gives (TOWN OF for Town), so a filing is never matched to a same-name government of another type. {matched:,} of the {ny['filings']:,} filings ({share(matched, ny['filings'])}) are matched.",
+        "",
+        checked(),
+        "",
+        "| `match` | Rule | Filings | Distinct names |",
+        "|---|---|---:|---:|",
+    ]
+    for name, doc in nylaws.MATCH_DOCS.items():
+        lines.append(f"| `{name}` | {doc} | {matches[name]['filings']:,} | {matches[name]['names']:,} |")
+    lines += ["", "| Department type | Filings | Matched | Share matched |", "|---|---:|---:|---:|"]
+    for kind, entry in kinds.items():
+        lines.append(f"| {kind or '(none)'} | {entry['filings']:,} | {entry['matched']:,} | {share(entry['matched'], entry['filings'])} |")
+    lines += ["", "| Census title | Governments | With a matched filing | Share |", "|---|---:|---:|---:|"]
+    for title, entry in ny["governments"].items():
+        lines.append(f"| {title} | {entry['governments']:,} | {entry['with_filings']:,} | {share(entry['with_filings'], entry['governments'])} |")
+    lines += ["", without_filings(ny["without_filings"])]
+
+    def listed(entries):
+        return ", ".join(f"{kind or '(none)'} {name or '(none)'} ({n:,})" for kind, name, n in entries) or "none"
+
+    lines += [
+        "",
+        f"Ambiguous, with the number of filings: {listed(ny['ambiguous'])}.",
+        "",
+        f"Unmatched, with the number of filings: {listed(ny['unmatched'])}.",
+        "",
+    ]
+    return lines
+
+
+def titled(census_name):
+    """Town of Hempstead for TOWN OF HEMPSTEAD."""
+    return census_name.title().replace(" Of ", " of ")
+
+
+def checked():
+    """The paragraph on the check of New York's matches against the filings' text, from the answers precision.py keeps."""
+    parts = precision.summary()
+    main, second = parts["main"], parts["supplement"]
+    n, found = main["filings"], main["outcomes"]
+    confirmed_names = [census_name for part, _, _, _, census_name, generic, name, _, _, other in precision.RESULTS if part == "main" and precision.outcome(generic, name, other) == "confirmed"]
+    example = f", such as {confirmed_names[0]}," if confirmed_names else ""
+    contradicted = found["contradicted"]
+    verdict = "No filing was" if not contradicted else f"{contradicted:,} {'was' if contradicted == 1 else 'were'}"
+    lines = [
+        f"To check the matches, {n} matched filings were drawn at random, leaving out five used first to try the queries, and looked up on {day(precision.CHECKED)} in the search API's full-text index of the filed PDFs; the PDFs themselves were not fetched. The API was asked about one filing at a time, once with that text and once without it, so a term found only with it is in the text and not in the filing's metadata.",
+        f"{found['confirmed']:,} of the {n} were confirmed: their text has the matched government's Census name{example} and their metadata does not. {verdict} contradicted, that is, found to name a same-name government of another type and not the matched one.",
+    ]
+    rest = []
+    if found["in_metadata"]:
+        rest.append(f"for {found['in_metadata']:,}, the metadata has the name too, so the search cannot tell whether the text does")
+    if found["not_named"]:
+        rest.append(f"for {found['not_named']:,}, the text has neither the name nor that of a same-name government of another type")
+    if found["no_text"]:
+        rest.append(f"for {found['no_text']:,}, the search finds no text")
+    if rest:
+        lines.append("Of the rest, " + "; ".join(rest) + ".")
+    lines.append(f"As controls, the Census name of another government of the same type, drawn at random, was found in {main['decoys_found']:,} of the {n} filings, and that of a same-name government of another type in {main['other_found']:,} of the {main['with_other']:,} filings that have one.")
+    pairs = [(census_name, other_name) for part, _, _, _, census_name, _, _, _, _, other in precision.RESULTS if part == "supplement" for other_name, _, hit in other if hit]
+    confirmed_second = second["outcomes"]["confirmed"]
+    second_line = f"Of a second draw of {second['filings']:,} filings matched by name and county, {'all ' if confirmed_second == second['filings'] else ''}{confirmed_second:,} were confirmed"
+    if second["other_found"]:
+        second_line += f", and {second['other_found']:,} of the {second['with_other']:,} with a same-name government of another type have its Census name as well, as the {titled(pairs[0][0])}'s filing has {pairs[0][1]}"
+    lines.append(second_line + ".")
+    lines.append(form_titles(parts))
+    filings = main["filings"] + second["filings"]
+    with_text = main["with_text"] + second["with_text"]
+    if with_text == filings:
+        lines.append(f"Every filing checked, the oldest filed {day(min(main['first_filed'], second['first_filed']))}, has text the search reads: a term the check asked, such as \"hereby\" or \"enacted\", is in its text and not its metadata.")
+    else:
+        lines.append(f"{with_text:,} of the {filings:,} filings checked have text the search reads: a term the check asked, such as \"hereby\" or \"enacted\", is in their text and not their metadata.")
+    lines.append(f"A sample of {n} cannot rule out wrong matches among several percent of filings. [`local_laws/precision.py`]({GITHUB}/blob/main/local_laws/precision.py) keeps the draw and every answer, and [`checks/ny_precision.py`]({GITHUB}/blob/main/checks/ny_precision.py) redraws it from the published tables.")
+    return " ".join(lines)
+
+
+def form_titles(parts):
+    """The sentence on the matched name found after a title that no government of that name has."""
+    asked = sum(entry["unnamed_asked"] for entry in parts.values())
+    found = sum(entry["unnamed_found"] for entry in parts.values())
+    phrases = [(census_name, phrase, hit) for _, filename, _, _, census_name, *_ in precision.RESULTS for phrase, hit in precision.unnamed(filename)]
+    if not found:
+        return f"The matched name after a title that no government of that name has, such as {phrases[0][1]} for the {titled(phrases[0][0])}, was found in none of the {asked:,} filings checked."
+    census_name, phrase, _ = next(entry for entry in phrases if entry[2])
+    return f"Yet the matched name after a title that no government of that name has, such as {phrase} for the {titled(census_name)}, was found in {found:,} of the {asked:,} filings checked, likely because the Department's [filing form]({NY_FORM}) prints the four titles before \"of\" and the government's name. So a phrase naming a same-name government of another type does not by itself make a match wrong, and a confirmation shows that the text has the name more surely than that it has the title."
+
+
+def codifications(n):
+    if n == 1:
+        return "1 of the filings is a county codification rather than a local law"
+    return f"{n:,} of the filings are county codifications rather than local laws"
+
+
+def misdated(filings):
+    """A sentence, with its leading space, on filings dated after the day they were added; empty when there are none."""
+    if not filings:
+        return ""
+    named = "; ".join(f"{kind} {name}, local law {number or '(none)'}, filed {day(filed)} by its record and added {day(added)} (`{filename}`)" for filename, kind, name, number, filed, added in filings)
+    if len(filings) == 1:
+        return f" One filing is dated after the day it was added, so one of those dates is wrong; the table keeps both as the Department recorded them: {named}."
+    return f" {len(filings):,} filings are dated after the day they were added, so one date of each is wrong; the table keeps the dates as the Department recorded them: {named}."
+
+
+def posting(posted):
+    lines = ["`posted_at` is when a filing was added to the Department's document library, which the search reads." + (f" {posted['moved']:,} filings were added from {day(posted['moved_from'])} to {day(posted['moved_to'])}, {posted['moved_filed_before']:,} of them filed before then; for those, `posted_at` is the day they came into the library and says nothing of when they were first published." if posted["moved"] else ""), ""]
+    quote = f"The Department's [manual]({NY_MANUAL}), dated February 19, 2016, says filings are \"usually included in the Local Laws Database within two business days\"."
+    if not posted["recent"]:
+        return lines + [f"{quote} No filing was added in the {nylaws.RECENT_DAYS} days to {day(posted['latest'])} with a filing date before it was added, so the table has no recent measure of how long that takes.", ""]
+    return lines + [f"{quote} Of the {posted['recent']:,} filings added in the {nylaws.RECENT_DAYS} days to {day(posted['latest'])}, {posted['within_two_weekdays']:,} ({share(posted['within_two_weekdays'], posted['recent'])}) were added within two weekdays after the day they were filed; at least half were added within {posted['median_weekdays']:,} {'weekday' if posted['median_weekdays'] == 1 else 'weekdays'}, and at least nine in ten within {posted['p90_days']:,} {'day' if posted['p90_days'] == 1 else 'days'}. Days are counted in New York time, and holidays count as weekdays, so a wait over a holiday counts a day more than it would in business days.", ""]
+
+
+def without_filings(places):
+    if not places:
+        return "Every government in the table has at least one matched filing."
+    named = "; ".join(f"{name}, in {county.title() + ' County' if county else 'no county'} (`{census_id}`{f', population {population:,}' if population is not None else ''})" for census_id, name, county, population in places)
+    if len(places) == 1:
+        return f"The one government in the table without a matched filing is {named}."
+    return f"The {len(places):,} governments in the table without a matched filing are {named}."
+
+
 def codifiers(manifest):
     lx = manifest["stats"]["locus"]
     return [
@@ -192,6 +371,7 @@ def gaps(manifest):
     stats = manifest["stats"]
     types, lx = stats["types"], stats["locus"]
     notes = manifest["sources"]["census_governments"]["normalization"]
+    ny_source = manifest["sources"]["ny_local_laws"]
     dormant = sum(entry["governments"] - entry["active"] for entry in types.values())
     web = sum(entry["with_web_address"] for entry in types.values())
     lines = [
@@ -210,13 +390,27 @@ def gaps(manifest):
         f"- {dormant:,} governments the Census marks dormant are rows, because the Census still counts them.",
         f"- Web addresses are as reported to the Census, which says it did minimal quality control on them; they are not checked here. {web:,} of the {stats['governments']:,} governments reported one. The Census file's mailing addresses and contact titles are left out: the map does not need them, and a few of the addresses name a person.",
         "- LOCUS's text is not here, and LOCUS names are matched to governments by name, with the precision described under Matching. Which governments' codes the codifiers hold is not known here; see Where local law is published.",
+        f"- `ny_local_laws` covers New York alone, and only its local laws. The Department's guide, [Adopting Local Laws in New York State]({NY_GUIDE}), notes that under the Municipal Home Rule Law a local law \"shall not include an ordinance, resolution or other similar act of the legislative body\", so those acts are not here. Nor are laws filed before the Department's database begins: its manual says \"Local Laws filed prior to January 1, 1998 are not in the Local Laws Database. They are maintained in manual files.\"",
+        f"- `ny_local_laws` is the search as it answered on {day(ny_source['finished_at'])}. A filing the Department had not yet added, or has removed or corrected since, is not reflected, and since filings took days to weeks to be added (see New York local laws), the weeks before then are incomplete.",
+        f"- {NY_OUTSIDE}",
+        scans(),
+        "- New York filings are matched to governments by the Department's type and name, and the county a name sometimes carries, not by their text; a check of a sample against the text is under New York local laws. A village dissolved before 2022 has no government in the 2022 Census of Governments, and a filing recorded under a name or type the Census does not use is `unmatched`; both are listed under New York local laws.",
         "",
     ]
     return lines
 
 
+def scans():
+    """The gap bullet on the laws' text, with what the check of the matches found of it."""
+    parts = precision.summary().values()
+    filings = sum(entry["filings"] for entry in parts)
+    with_text = sum(entry["with_text"] for entry in parts)
+    first, last = min(entry["first_filed"] for entry in parts), max(entry["last_filed"] for entry in parts)
+    return f"- The laws' text is not here, only a link to each filed PDF, which this pipeline does not open. The search reads text for {'every one' if with_text == filings else f'{with_text:,}'} of the {filings:,} filings the check of the matches looked up, filed from {day(first)} to {day(last)}, but that is a sample: whether every filing's text can be searched, and how faithful to the page the text of a scan is, is not known here."
+
+
 def sources(manifest):
-    census_source, org02, locus_source = (manifest["sources"][key] for key in ("census_governments", "census_org02", "locus"))
+    census_source, org02, locus_source, ny = (manifest["sources"][key] for key in ("census_governments", "census_org02", "locus", "ny_local_laws"))
     return [
         "## Sources",
         "",
@@ -225,8 +419,9 @@ def sources(manifest):
         f"| [2022 Census of Governments, Government Units List]({census_source['url']}) | SHA-256 `{census_source['sha256']}` | `governments`: {census_source['rows']:,} rows |",
         f"| [CG2200ORG02, Local Governments by Type and State, 2022]({org02['url']}) | SHA-256 `{org02['sha256']}` | Checking `governments`: {org02['counts_compared']:,} counts by state and type compared, {org02['mismatches']:,} differ |",
         f"| [LOCUS-v1]({LOCUS_URL}) | commit `{locus_source['revision']}` | `locus_crosswalk`: {locus_source['rows']:,} rows read |",
+        f"| [New York Department of State, Local Laws search]({ny['app']}), through its API `{ny['api']}` | read from {moment(ny['started_at'])} to {moment(ny['finished_at'])}, when it counted {ny['total']:,} filings | `ny_local_laws` |",
         "",
-        "`python -m local_laws run` downloads each source at its pinned version, stops if its bytes or its counts are not what the pipeline was checked against, and commits both tables, `manifest.json` and this card in one commit. It runs by hand, not on a schedule: the sources are fixed releases, and a new release needs a person to review it before its pin changes. `python -m local_laws verify` re-reads the published files and checks them against `manifest.json`, the Census's table and LOCUS's card.",
+        "`python -m local_laws run` downloads the Census files and LOCUS at their pinned versions and reads New York's API afresh, or builds from a snapshot of it that `python -m local_laws harvest-ny` wrote. It stops if any source's bytes or counts are not what the pipeline was checked against, and commits the tables, `manifest.json` and this card in one commit. It runs by hand, not on a schedule: the Census files and LOCUS are fixed releases, and a new release needs a person to review it before its pin changes. `python -m local_laws verify` re-reads the published files and checks them against `manifest.json`, the Census's table, LOCUS's card and the API's counts recorded at the reading.",
         "",
     ]
 
@@ -246,20 +441,22 @@ def license_section():
         "",
         "- The Census files are works of the United States Government and are not subject to copyright in the United States ([17 U.S.C. § 105](https://www.copyright.gov/title17/92chap1.html#105)).",
         f"- The crosswalk records facts about LOCUS-v1, namely its jurisdiction names, their row counts and counts of type words in their text, and holds none of its text. LOCUS licenses its text [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/), which anyone using that text must follow. Cite LOCUS as {LOCUS_CITATION}.",
+        f"- `ny_local_laws` records facts about each filing, namely who filed it, its number, its dates, its PDF's name, size and public link, and the law's title as the Department records it, and holds none of the laws' text. Titles are among the \"words and short phrases such as names, titles, and slogans\" that the Copyright Office's rules list as not subject to copyright ([37 C.F.R. § 202.1(a)]({CFR_TITLES})). On September 26, 2026 the Department's Local Laws pages linked no terms of use, its [disclaimer]({NY_DISCLAIMER}) covered only its links to other sites, and the API's host had no robots.txt (it answered HTTP 404).",
         "",
     ]
 
 
 def render(manifest):
     stats = manifest["stats"]
-    lines = front_matter(stats["governments"])
+    ny = manifest["sources"]["ny_local_laws"]
+    lines = front_matter(sum(entry["rows"] for entry in manifest["files"].values()))
     lines += [
         f"# {TITLE}",
         "",
-        f"Every local government the Census Bureau's 2022 Census of Governments counts, {stats['governments']:,} of them in the 50 states and the District of Columbia, and which of them have ordinance text in [LOCUS]({LOCUS_URL}), a public corpus of local ordinances. It maps who makes local law and how much of that law LOCUS holds; the laws themselves are not here.",
+        f"Every local government the Census Bureau's 2022 Census of Governments counts, {stats['governments']:,} of them in the 50 states and the District of Columbia; which of them have ordinance text in [LOCUS]({LOCUS_URL}), a public corpus of local ordinances; and every local law in the New York Department of State's online search, {stats['ny']['filings']:,} filings, each matched where it can be to the government that filed it. It maps who makes local law, how much of that law LOCUS holds, and, for New York, the local laws its governments have filed with the state since 1998; the laws' text is not here.",
         "",
-        f"Every row is built by code from sources pinned by SHA-256 or commit, which the build checks against each other. The only hand-made input to the rows is {len(locus.ALIASES)} name aliases, listed under Matching. The pipeline and its tests are in [{GITHUB.removeprefix('https://')}]({GITHUB}), and this card is rendered from `manifest.json` in the same commit.",
+        f"Every row is built by code: the Census files and LOCUS from versions pinned by SHA-256 or commit, which the build checks against each other, and New York's filings from the Department's search API as it answered on {day(ny['finished_at'])}, checked against the API's own counts. The only hand-made input to the rows is {len(locus.ALIASES)} name aliases for LOCUS, listed under Matching. The pipeline and its tests are in [{GITHUB.removeprefix('https://')}]({GITHUB}), and this card is rendered from `manifest.json` in the same commit.",
         "",
     ]
-    lines += coverage(stats) + use() + files(manifest) + matching(manifest) + codifiers(manifest) + gaps(manifest) + sources(manifest) + license_section() + by_state(stats)
+    lines += coverage(stats) + new_york(manifest) + use() + files(manifest) + matching(manifest) + codifiers(manifest) + gaps(manifest) + sources(manifest) + license_section() + by_state(stats)
     return "\n".join(lines)

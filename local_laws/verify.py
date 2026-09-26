@@ -1,4 +1,4 @@
-"""Checks a published build: its files against manifest.json, its tables against their schemas and each other, its counts against the Census's own table and LOCUS's card, and its card against a fresh render."""
+"""Checks a published build: its files against manifest.json, its tables against their schemas and each other, its counts against the Census's own table, LOCUS's card and the New York API's counts at the harvest, and its card against a fresh render."""
 
 import json
 import re
@@ -6,7 +6,7 @@ from collections import Counter
 
 import pyarrow as pa
 
-from . import census, locus
+from . import census, locus, nylaws
 from .build import summarize
 from .card import render
 from .schema import TABLES
@@ -66,6 +66,48 @@ def check_crosswalk(rows, government_ids, problems):
     duplicates = [uid for uid, n in Counter(row["census_id"] for row in rows if row["census_id"]).items() if n > 1]
     if duplicates:
         problems.append(f"locus_crosswalk: census_id matched by more than one jurisdiction: {sample(duplicates)}")
+
+
+def check_ny(rows, governments, source, problems):
+    """governments is None when that table was not read, so no census_id is judged against it. source is the manifest's record of the harvest."""
+    ids = Counter(row["asset_id"] for row in rows)
+    if None in ids or "" in ids:
+        problems.append(f"ny_local_laws: {ids[None] + ids['']:,} rows without asset_id")
+    duplicates = [uid for uid, n in ids.items() if uid and n > 1]
+    if duplicates:
+        problems.append(f"ny_local_laws: duplicate asset_id: {sample(duplicates)}")
+    counted = source.get("years") or {}
+    if sum(counted.values()) != source.get("total"):
+        problems.append(f"ny_local_laws: the manifest's API counts by year add to {sum(counted.values()):,}, not its total {source.get('total')}")
+    if len(rows) != source.get("total"):
+        problems.append(f"ny_local_laws: {len(rows):,} rows; the API counted {source.get('total')} filings at the harvest")
+    years = {str(year): n for year, n in Counter(row["date_filed"].year for row in rows if row["date_filed"]).items()}
+    differing = sorted(year for year in set(years) | set(counted) if years.get(year, 0) != counted.get(year, 0))
+    if differing:
+        problems.append(f"ny_local_laws: filings by year differ from the API's counts at the harvest in {sample(differing)}")
+    links = [row["asset_id"] for row in rows if not row["share_url"] or not nylaws.SHARE.fullmatch(row["share_url"])]
+    if links:
+        problems.append(f"ny_local_laws: share_url is not the Department's public link: {sample(links)}")
+    unknown = sorted({row["match"] for row in rows} - set(nylaws.MATCHES))
+    if unknown:
+        problems.append(f"ny_local_laws: match values {unknown} are not among {list(nylaws.MATCHES)}")
+    titles = None if governments is None else {row["census_id"]: nylaws.split_title(row["name"])[0] for row in governments if row["state"] == "NY"}
+    inconsistent, stray, mistitled = [], [], []
+    for row in rows:
+        unmatched = row["match"] not in nylaws.MATCHED
+        if (row["census_id"] is None) != unmatched or bool(row["candidates"]) != (row["match"] == "ambiguous"):
+            inconsistent.append(row["asset_id"])
+        elif titles is not None and row["census_id"] is not None:
+            if row["census_id"] not in titles:
+                stray.append(row["asset_id"])
+            elif titles[row["census_id"]] != nylaws.TITLES.get(row["municipality_type"]):
+                mistitled.append(row["asset_id"])
+    if inconsistent:
+        problems.append(f"ny_local_laws: census_id, match and candidates disagree: {sample(inconsistent)}")
+    if stray:
+        problems.append(f"ny_local_laws: census_id is not a New York government in governments: {sample(stray)}")
+    if mistitled:
+        problems.append(f"ny_local_laws: census_id's Census title is not the one municipality_type gives: {sample(mistitled)}")
 
 
 def verify(store, fetcher=None, stated_rows=None):
@@ -137,9 +179,12 @@ def verify(store, fetcher=None, stated_rows=None):
             report["locus_stated_rows"] = stated
             if read != stated:
                 problems.append(f"locus_crosswalk: {read:,} LOCUS rows, LOCUS's card states {stated:,}")
-    if governments is not None and crosswalk is not None:
+    ny = tables.get("ny_local_laws")
+    if ny is not None:
+        check_ny(ny, governments, sources.get("ny_local_laws") or {}, problems)
+    if governments is not None and crosswalk is not None and ny is not None:
         try:
-            stats = json.loads(json.dumps(summarize(governments, crosswalk)))
+            stats = json.loads(json.dumps(summarize(governments, crosswalk, ny)))
         except (KeyError, TypeError) as error:
             problems.append(f"the manifest's stats cannot be recomputed from the tables: {type(error).__name__}: {error}")
         else:

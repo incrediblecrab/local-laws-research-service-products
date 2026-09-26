@@ -1,13 +1,17 @@
 """python -m local_laws end to end on the fixtures: exit codes, what is written, and what is refused."""
 
+import copy
+import itertools
 import json
 
 import pytest
 
-from conftest import CODE, FakeFetcher, fake_locus_download
-from local_laws import census, cli, locus
+from conftest import CODE, NY_SAMPLE, FakeFetcher, FakeNYApi, fake_locus_download
+from local_laws import census, cli, locus, nylaws
 from local_laws.http import Blocked, Unavailable
 from local_laws.store import CARD, MANIFEST, LocalStore, Superseded
+
+FILES = [CARD, "data/governments.parquet", "data/locus_crosswalk.parquet", "data/ny_local_laws.parquet", MANIFEST]
 
 
 @pytest.fixture
@@ -23,19 +27,58 @@ def run(*argv):
     return cli.main(list(argv))
 
 
-def test_run_writes_a_build_that_verifies_and_an_unchanged_rerun_writes_nothing(tmp_path, offline, capsys):
+@pytest.fixture
+def snapshot(tmp_path):
+    """The New York sample saved as harvest-ny saves a snapshot."""
+    path = tmp_path / "ny.json.gz"
+    nylaws.save(NY_SAMPLE, path)
+    return str(path)
+
+
+class DownNYApi(FakeNYApi):
+    def answer(self, url):
+        raise Unavailable("HTTP 503 from locallaws.static-assets.ny.gov")
+
+
+def test_run_writes_a_build_that_verifies_and_an_unchanged_rerun_writes_nothing(tmp_path, offline, capsys, snapshot):
     out, work = tmp_path / "out", tmp_path / "work"
-    assert run("run", "--local", str(out), "--workdir", str(work)) == 0
-    assert json.loads(capsys.readouterr().out) == {"governments": 50, "locus_jurisdictions": 25, "matched": 23, "requests": 2, "commit": "1", "unchanged": False}
-    assert LocalStore(out).list_files() == [CARD, "data/governments.parquet", "data/locus_crosswalk.parquet", MANIFEST]
+    assert run("run", "--local", str(out), "--workdir", str(work), "--ny-snapshot", snapshot) == 0
+    assert json.loads(capsys.readouterr().out) == {"governments": 50, "locus_jurisdictions": 25, "matched": 23, "ny_filings": 25, "ny_matched": 10, "requests": 2, "commit": "1", "unchanged": False}
+    assert LocalStore(out).list_files() == FILES
     assert not any(path.name.startswith("locus-") for path in work.iterdir()), "LOCUS's download is deleted after the build"
     manifest = (out / MANIFEST).read_text()
-    assert run("run", "--local", str(out)) == 0
+    assert run("run", "--local", str(out), "--ny-snapshot", snapshot) == 0
     assert json.loads(capsys.readouterr().out)["unchanged"] is True
     assert (out / MANIFEST).read_text() == manifest, "an unchanged rebuild is not committed, so even built_at stays"
     assert run("verify", "--local", str(out)) == 0
     report = json.loads(capsys.readouterr().out)
     assert (report["problems"], report["org02_counts_compared"], report["locus_stated_rows"]) == ([], 312, 71)
+
+
+def test_a_run_without_a_snapshot_reads_the_api_and_harvest_ny_saves_the_same_reading(tmp_path, offline, monkeypatch, capsys):
+    clock = (f"2026-09-26T04:{minute:02d}:00Z" for minute in itertools.count())
+    monkeypatch.setattr(nylaws, "now", lambda: next(clock))
+    live, saved, path = tmp_path / "live", tmp_path / "saved", tmp_path / "ny.json.gz"
+    assert run("run", "--local", str(live)) == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert (summary["ny_filings"], summary["ny_matched"], summary["requests"] > 2, summary["unchanged"]) == (25, 10, True, False)
+    assert run("run", "--local", str(live)) == 0
+    assert json.loads(capsys.readouterr().out)["unchanged"] is False, "a new reading of the API is a new build: the manifest says when it was read"
+    assert run("harvest-ny", "--out", str(path)) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert (report["total"], report["years"], report["requests"]) == (25, NY_SAMPLE["years"], summary["requests"] - 2)
+    assert nylaws.load(path)["items"] == NY_SAMPLE["items"]
+    assert run("run", "--local", str(saved), "--ny-snapshot", str(path)) == 0
+    capsys.readouterr()
+    assert (saved / "data/ny_local_laws.parquet").read_bytes() == (live / "data/ny_local_laws.parquet").read_bytes()
+
+
+def test_harvest_ny_stops_with_nothing_written_when_the_api_does_not_answer(tmp_path, offline, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher(ny=DownNYApi()))
+    path = tmp_path / "ny.json.gz"
+    assert run("harvest-ny", "--out", str(path)) == cli.STOPPED
+    assert "stopped, nothing written: Unavailable: HTTP 503 from locallaws.static-assets.ny.gov" in capsys.readouterr().err
+    assert not path.exists()
 
 
 def test_verify_exits_1_on_a_problem_and_card_repairs_the_card(tmp_path, offline, capsys):
@@ -55,12 +98,28 @@ def test_verify_exits_1_on_a_problem_and_card_repairs_the_card(tmp_path, offline
     (lambda monkeypatch: monkeypatch.setattr(locus, "stated_rows", lambda: 72) or monkeypatch.setattr(locus, "download", lambda directory: (fake_locus_download(directory)[0], 72)), "SourceChanged: read 71 LOCUS rows; its card states 72"),
     (lambda monkeypatch: monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher({census.GOVT_UNITS_URL: Blocked("bot challenge at www2.census.gov/")})), "Blocked: bot challenge"),
     (lambda monkeypatch: monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher({census.ORG02_URL: Unavailable("HTTP 503 from www2.census.gov")})), "Unavailable: HTTP 503"),
+    (lambda monkeypatch: monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher(ny=DownNYApi())), "Unavailable: HTTP 503 from locallaws.static-assets.ny.gov"),
 ])
 def test_a_source_that_is_not_what_was_checked_stops_the_run_with_nothing_written(tmp_path, offline, monkeypatch, capsys, plant, stop):
     plant(monkeypatch)
     out = tmp_path / "out"
     assert run("run", "--local", str(out)) == cli.STOPPED
     assert f"stopped, nothing written: {stop}" in capsys.readouterr().err
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("edit, stop", [
+    (lambda sample: sample["items"].pop(), "the NY snapshot holds 24 filings; its API counts say 25"),
+    (lambda sample: sample["items"][0]["fields"].update(dateFiled=["2002-05-05T05:00:00Z"]), "the NY snapshot holds 25 filings; its API counts say 25, by year"),
+])
+def test_a_snapshot_whose_filings_are_not_its_counts_stops_the_run_with_nothing_written(tmp_path, offline, capsys, edit, stop):
+    sample = copy.deepcopy(NY_SAMPLE)
+    assert sample["years"].get("2002") == 0
+    edit(sample)
+    path, out = tmp_path / "ny.json.gz", tmp_path / "out"
+    nylaws.save(sample, path)
+    assert run("run", "--local", str(out), "--ny-snapshot", str(path)) == cli.STOPPED
+    assert f"stopped, nothing written: SourceChanged: {stop}" in capsys.readouterr().err
     assert not out.exists()
 
 
@@ -73,7 +132,7 @@ def test_a_superseded_commit_exits_1(tmp_path, offline, monkeypatch, capsys):
     assert "not written: x/y has a commit this run did not write" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("code", [{"version": "0.1.0", "commit": "a" * 40, "dirty": True}, {"version": "0.1.0", "commit": None, "dirty": None}])
+@pytest.mark.parametrize("code", [{"version": "0.2.0", "commit": "a" * 40, "dirty": True}, {"version": "0.2.0", "commit": None, "dirty": None}])
 @pytest.mark.parametrize("command", ["run", "card"])
 def test_the_hub_is_not_written_from_code_that_is_not_committed(offline, monkeypatch, capsys, code, command):
     monkeypatch.setattr(cli, "code_version", lambda: code)
@@ -86,13 +145,13 @@ def test_the_hub_is_not_written_from_code_that_is_not_committed(offline, monkeyp
     assert "refusing to write to the Hub" in capsys.readouterr().err
 
 
-def test_a_rerun_commits_a_card_that_is_not_the_current_render(tmp_path, offline, capsys):
+def test_a_rerun_commits_a_card_that_is_not_the_current_render(tmp_path, offline, capsys, snapshot):
     out = tmp_path / "out"
-    assert run("run", "--local", str(out)) == 0
+    assert run("run", "--local", str(out), "--ny-snapshot", snapshot) == 0
     card = (out / CARD).read_text()
     (out / CARD).write_text("an older card\n")
     capsys.readouterr()
-    assert run("run", "--local", str(out)) == 0
+    assert run("run", "--local", str(out), "--ny-snapshot", snapshot) == 0
     assert json.loads(capsys.readouterr().out)["unchanged"] is False and (out / CARD).read_text() == card
 
 

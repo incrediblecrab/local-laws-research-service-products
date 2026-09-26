@@ -1,4 +1,4 @@
-"""python -m local_laws {run,verify,card}: build the dataset and publish it, check what is published, or re-render its card."""
+"""python -m local_laws {run,verify,card,harvest-ny}: build the dataset and publish it, check what is published, re-render its card, or read New York's local-law filings into a snapshot to build from."""
 
 import argparse
 import json
@@ -8,7 +8,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import REPO_ID, locus
+from . import REPO_ID, locus, nylaws
 from .build import build, code_version, unchanged
 from .card import render
 from .census import SourceChanged
@@ -44,12 +44,16 @@ def cmd_run(args):
     workdir.mkdir(parents=True, exist_ok=True)
     fetcher = Fetcher()
     try:
-        manifest, files = build(fetcher, workdir, code=code)
-        summary = {"governments": manifest["stats"]["governments"], "locus_jurisdictions": manifest["stats"]["locus"]["jurisdictions"], "matched": manifest["stats"]["locus"]["matched"], "requests": fetcher.requests}
+        snapshot = nylaws.load(args.ny_snapshot) if args.ny_snapshot else None
+        manifest, files = build(fetcher, workdir, ny_snapshot=snapshot, code=code)
+        stats = manifest["stats"]
+        summary = {"governments": stats["governments"], "locus_jurisdictions": stats["locus"]["jurisdictions"], "matched": stats["locus"]["matched"],
+                   "ny_filings": stats["ny"]["filings"], "ny_matched": sum(stats["ny"]["matches"][name]["filings"] for name in nylaws.MATCHED), "requests": fetcher.requests}
         if unchanged(store, manifest):
             print(json.dumps(dict(summary, commit=None, unchanged=True), indent=1))
             return 0
-        message = f"Build from the 2022 Census of Governments and LOCUS-v1 {locus.REVISION[:12]}" + (f" (pipeline {code['commit'][:12]})" if code["commit"] else "")
+        read = manifest["sources"]["ny_local_laws"]["finished_at"][:10]
+        message = f"Build from the 2022 Census of Governments, LOCUS-v1 {locus.REVISION[:12]} and New York's local laws as of {read}" + (f" (pipeline {code['commit'][:12]})" if code["commit"] else "")
         oid = store.commit({repo_path: str(local) for repo_path, local in files.items()}, message)
         print(json.dumps(dict(summary, commit=oid, unchanged=False), indent=1))
         return 0
@@ -107,6 +111,21 @@ def cmd_card(args):
     return 0
 
 
+def cmd_harvest_ny(args):
+    """Reads New York's local-law category into a snapshot file that `run --ny-snapshot` builds from, so a build can be repeated without reading the API again."""
+    fetcher = Fetcher()
+    try:
+        snapshot = nylaws.harvest(fetcher)
+    except (SourceChanged, Blocked, Unavailable) as error:
+        print(f"stopped, nothing written: {type(error).__name__}: {error}", file=sys.stderr)
+        return STOPPED
+    finally:
+        fetcher.close()
+    nylaws.save(snapshot, args.out)
+    print(json.dumps({"out": args.out, "total": snapshot["total"], "years": snapshot["years"], "started_at": snapshot["started_at"], "finished_at": snapshot["finished_at"], "requests": fetcher.requests}, indent=1))
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="local_laws", description=__doc__, allow_abbrev=False)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -119,11 +138,15 @@ def main(argv=None):
         sub.set_defaults(handler=handler)
         return sub
 
-    add("run", cmd_run, "download the sources, check them, build both tables and commit them with the manifest and card").add_argument(
-        "--workdir", help="keep scratch files here (default: a temporary directory, deleted afterwards); LOCUS's download needs about 2 GB")
-    add("verify", cmd_verify, "check the published files against the manifest, each other, CG2200ORG02 and LOCUS's card").add_argument(
+    run = add("run", cmd_run, "download the sources, check them, build the tables and commit them with the manifest and card")
+    run.add_argument("--workdir", help="keep scratch files here (default: a temporary directory, deleted afterwards); LOCUS's download needs about 2 GB")
+    run.add_argument("--ny-snapshot", help="build New York's table from a snapshot harvest-ny wrote, instead of reading the API again (about 1,500 requests)")
+    add("verify", cmd_verify, "check the published files against the manifest, each other, CG2200ORG02, LOCUS's card and the NY API's counts at the reading").add_argument(
         "--offline", action="store_true", help="skip the two checks that download: CG2200ORG02 and LOCUS's card")
     add("card", cmd_card, "re-render README.md from the published manifest")
+    harvest = commands.add_parser("harvest-ny", help="read New York's local-law filings from the Department of State's API into a snapshot file", allow_abbrev=False)
+    harvest.add_argument("--out", required=True, help="where to write the snapshot (gzipped JSON)")
+    harvest.set_defaults(handler=cmd_harvest_ny)
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     for noisy in ("httpx", "httpcore", "huggingface_hub"):

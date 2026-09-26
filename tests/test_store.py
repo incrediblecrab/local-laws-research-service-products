@@ -10,7 +10,7 @@ import pyarrow as pa
 import pytest
 from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 
-from conftest import FakeFetcher
+from conftest import NY_SAMPLE, FakeFetcher
 from local_laws import store as store_module
 from local_laws.store import MANIFEST, HubStore, Superseded, git_blob_sha1, write_parquet
 from local_laws.verify import verify
@@ -172,7 +172,7 @@ def test_a_published_build_verifies_through_the_hub_store(published, tmp_path):
     api = FakeApi({path: (local.root / path).read_bytes() for path in local.list_files()})
     hub = HubStore("x/y", token=False, api=api)
     report = verify(hub, fetcher=FakeFetcher(), stated_rows=lambda: manifest["sources"]["locus"]["rows"])
-    assert report["problems"] == [] and report["rows"] == {"governments": 50, "locus_crosswalk": 25}
+    assert report["problems"] == [] and report["rows"] == {"governments": 50, "locus_crosswalk": 25, "ny_local_laws": NY_SAMPLE["total"]}
     api.files["data/governments.parquet"] = api.files["data/governments.parquet"][:-1] + b"!"
     shutil.rmtree(tmp_path / "work", ignore_errors=True)
     problems = verify(HubStore("x/y", api=api))["problems"]

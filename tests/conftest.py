@@ -1,22 +1,27 @@
-"""Shared fixtures: the Census sample (real rows), a synthetic LOCUS (invented text; LOCUS's own is CC BY-NC), a fake fetcher and a build published to a local store."""
+"""Shared fixtures: the Census sample (real rows), a synthetic LOCUS (invented text; LOCUS's own is CC BY-NC), a sample of New York's local-law filings (real metadata) behind a fake of its API, a fake fetcher and a build published to a local store."""
 
+import copy
 import hashlib
 import io
+import json
+import re
 import zipfile
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import openpyxl
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from local_laws import census
+from local_laws import census, nylaws
 from local_laws.build import build
 from local_laws.store import LocalStore
 
 FIXTURES = Path(__file__).parent / "fixtures"
 UNITS = (FIXTURES / "govt_units_sample.zip").read_bytes()
 ORG02 = (FIXTURES / "org02_sample.zip").read_bytes()
+NY_SAMPLE = json.loads((FIXTURES / "ny_snapshot_sample.json").read_text())
 BUILT_AT = "2026-09-25T00:00:00Z"
 CODE = {"version": "test", "commit": "0" * 40, "dirty": False}
 
@@ -110,15 +115,70 @@ def fake_locus_download(directory):
     return write_locus(directory)
 
 
-class FakeFetcher:
-    """Answers the two Census URLs with the fixtures; a value that is an exception is raised instead."""
+def ny_snapshot():
+    """A fresh copy of the sample snapshot, as nylaws.harvest returns one."""
+    return copy.deepcopy(NY_SAMPLE)
 
-    def __init__(self, responses=None):
+
+def api_item(kept):
+    """An API search result carrying what nylaws.keep reads from one, and a signed download link it must leave out."""
+    return {
+        "id": kept["id"], "external_id": kept["external_id"], "filename": kept["filename"], "created_date": kept["created_date"], "last_update_date": kept["last_update_date"],
+        "current_version": kept["current_version"], "deleted_date": kept["deleted_date"], "released_and_not_expired": kept["released_and_not_expired"],
+        "file_properties": {"size_in_bytes": kept["size_in_bytes"], "format": "PDF"},
+        "embeds": {"document_viewer": {"share": kept["share"], "url": "https://orders-bb.us-east-1.widencdn.net/x?Signature=s&Expires=1"}},
+        "metadata": {"fields": copy.deepcopy(kept["fields"])},
+        "_links": {"download": "https://orders-bb.us-east-1.widencdn.net/download?Signature=s&Expires=1&Key-Pair-Id=k"},
+    }
+
+
+class FakeNYApi:
+    """The Department's search API over a list of kept items: its query syntax for the category and a dateFiled range, its sorts, and its limits.
+    before_answer(api, params), if given, runs before each answer, so a test can change the filings while they are read. queries records each request's parameters."""
+
+    RANGE = re.compile(r"cat:\(Local Laws\)(?: AND dateFiled:\[(\S+) TO (\S+)\])?")
+
+    def __init__(self, items=None, before_answer=None):
+        self.items = [copy.deepcopy(item) for item in (NY_SAMPLE["items"] if items is None else items)]
+        self.before_answer = before_answer
+        self.queries = []
+
+    def answer(self, url):
+        params = {key: values[0] for key, values in parse_qs(urlsplit(url).query).items()}
+        self.queries.append(params)
+        if self.before_answer:
+            self.before_answer(self, params)
+        found = self.RANGE.fullmatch(params["query"])
+        if not found or params["search_document_text"] != "false":
+            raise ValueError(f"the fake API does not answer {params}")
+        start, end = found.groups()
+        hits = [item for item in self.items if start is None or start <= item["fields"]["dateFiled"][0] <= end]
+        order = params["sort"]
+        field = order.lstrip("-")
+        if field == "filename":
+            hits.sort(key=lambda item: item["filename"], reverse=order.startswith("-"))
+        elif field == "dateFiled":
+            hits.sort(key=lambda item: item["fields"]["dateFiled"][0], reverse=order.startswith("-"))
+        else:
+            raise ValueError(f"the fake API does not sort by {order}")
+        limit, offset = int(params["limit"]), int(params["offset"])
+        if limit > 100 or offset + limit > nylaws.WINDOW:
+            raise ValueError(f"HTTP 400: limit {limit} at offset {offset}")
+        return {"total_count": len(hits), "items": [api_item(item) for item in hits[offset:offset + limit]]}
+
+
+class FakeFetcher:
+    """Answers the two Census URLs with the fixtures and New York's API from a FakeNYApi; a value that is an exception is raised instead."""
+
+    def __init__(self, responses=None, ny=None):
         self.responses = {census.GOVT_UNITS_URL: UNITS, census.ORG02_URL: ORG02} | (responses or {})
+        self.ny = ny or FakeNYApi()
         self.requests = 0
 
     def get(self, url):
         self.requests += 1
+        if url.startswith(nylaws.API + "?"):
+            return json.dumps(self.ny.answer(url)).encode()
         value = self.responses[url]
         if isinstance(value, Exception):
             raise value
@@ -153,7 +213,7 @@ def pins(monkeypatch):
 @pytest.fixture
 def published(tmp_path, pins):
     """A build of the fixtures committed to a local store: (store, manifest)."""
-    manifest, files = build(FakeFetcher(), tmp_path / "work", locus_download=fake_locus_download, built_at=BUILT_AT, code=CODE)
+    manifest, files = build(FakeFetcher(), tmp_path / "work", locus_download=fake_locus_download, ny_snapshot=ny_snapshot(), built_at=BUILT_AT, code=CODE)
     store = LocalStore(tmp_path / "hub")
     store.commit(files, "build")
     return store, manifest

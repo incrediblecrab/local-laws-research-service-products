@@ -1,4 +1,4 @@
-"""The two tables' columns and what each means. The card's schema tables and the verify check both read from here."""
+"""Each table's columns and what each means. The card's schema tables and the verify check both read from here."""
 
 import pyarrow as pa
 
@@ -70,7 +70,52 @@ LOCUS_DOCS = {
     "text_fits": "Whether `text_type` is a word the matched government's Census title allows (`town` for TOWN OF BARRE; city, county, parish, borough, municipality or town for a consolidated government). Null when `text_mentions` is under 3, when `census_id` is null, or when the Census title has no type word to compare",
 }
 
+NY_LOCAL_LAWS = pa.schema([
+    ("asset_id", pa.string()),
+    ("municipality_type", pa.string()),
+    ("municipality_name", pa.string()),
+    ("law_number", pa.string()),
+    ("law_year", pa.int32()),
+    ("date_filed", pa.date32()),
+    ("title", pa.string()),
+    ("subject", pa.string()),
+    ("county_law_type", pa.string()),
+    ("county_municipal_type", pa.string()),
+    ("county_municipal_name", pa.string()),
+    ("enacted_through", pa.date32()),
+    ("filename", pa.string()),
+    ("file_bytes", pa.int64()),
+    ("posted_at", pa.timestamp("us", tz="UTC")),
+    ("share_url", pa.string()),
+    ("census_id", pa.string()),
+    ("match", pa.string()),
+    ("candidates", pa.list_(pa.string())),
+])
+
+NY_LOCAL_LAW_DOCS = {
+    "asset_id": "The filing's asset ID in the Department of State's document library (`id`). Unique; the key to join on",
+    "municipality_type": "`Town`, `Village`, `City` or `County`, as the Department records the filing government (`municipalityType`)",
+    "municipality_name": "The filing government's name as the Department records it (`municipalityName`): mostly capitals, such as FLORENCE, sometimes with a note such as Chester (Warren County) or Amherst (Corrected Copy)",
+    "law_number": "The local law's number within its government's year (`lawNumber`), as text. The Department assigns it for indexing, and it \"may be different from the number ascribed by the legislative body of the local government\"; null where the Department left it blank",
+    "law_year": "The year the local law is numbered in (`year`); null where the Department left it blank, as it did for nearly every filing before 2019",
+    "date_filed": "The date the Secretary of State filed the law (`dateFiled`, which the API gives as midnight Central time)",
+    "title": "The law's title (`subject1`), such as SHORT - RESIDENTIAL RENTAL LAW OF THE TOWN OF FLORENCE; null for nearly every filing before 2014 and for most of 2014",
+    "subject": "The Department's key for the filing (`subject`): name, year and number, such as FLORENCE20261 or FLOWER HILL 1998 2; for the two county codifications, their name",
+    "county_law_type": "`Codification` for a county's compiled code or charter (`countyLawType`); null for local laws",
+    "county_municipal_type": "`County` for a county codification (`countyMunicipalType`); null for local laws",
+    "county_municipal_name": "The Department's `countyMuncipalName` field, spelled as it spells it; null in every filing read so far",
+    "enacted_through": "For a county codification, the date its text is current to (`enactedThrough`); null for local laws",
+    "filename": "The filed PDF's name in the library (`filename`), such as 09021343803f6e63.pdf",
+    "file_bytes": "The PDF's size in bytes (`size_in_bytes`)",
+    "posted_at": "When the PDF was added to the library the search reads (`created_date`), in UTC. It says when a filing reached this library, not when it was first published: most filings came into the library together in 2024, and the card gives how long later filings took to be added",
+    "share_url": "The public link the Department's search page gives for the filing's PDF. The API's signed download links expire, so they are left out",
+    "census_id": "The filing government in `governments`, matched by name as `match` says; null when `match` is `ambiguous` or `unmatched`",
+    "match": "How `census_id` was found, one of the rules under New York local laws",
+    "candidates": "When `match` is `ambiguous`, the `census_id` of each government with the title and name; otherwise empty",
+}
+
 TABLES = {
     "governments": {"file": "data/governments.parquet", "schema": GOVERNMENTS, "docs": GOVERNMENT_DOCS},
     "locus_crosswalk": {"file": "data/locus_crosswalk.parquet", "schema": LOCUS_CROSSWALK, "docs": LOCUS_DOCS},
+    "ny_local_laws": {"file": "data/ny_local_laws.parquet", "schema": NY_LOCAL_LAWS, "docs": NY_LOCAL_LAW_DOCS},
 }

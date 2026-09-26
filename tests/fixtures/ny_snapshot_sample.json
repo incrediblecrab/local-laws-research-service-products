@@ -1,0 +1,972 @@
+{
+ "api": "https://locallaws.static-assets.ny.gov/api/search",
+ "category": "Local Laws",
+ "started_at": "2026-09-26T03:57:54Z",
+ "finished_at": "2026-09-26T04:23:24Z",
+ "total": 25,
+ "years": {
+  "1995": 1,
+  "1996": 0,
+  "1997": 2,
+  "1998": 0,
+  "1999": 2,
+  "2000": 0,
+  "2001": 0,
+  "2002": 0,
+  "2003": 1,
+  "2004": 0,
+  "2005": 0,
+  "2006": 1,
+  "2007": 1,
+  "2008": 1,
+  "2009": 0,
+  "2010": 1,
+  "2011": 0,
+  "2012": 0,
+  "2013": 1,
+  "2014": 0,
+  "2015": 3,
+  "2016": 1,
+  "2017": 0,
+  "2018": 0,
+  "2019": 1,
+  "2020": 1,
+  "2021": 1,
+  "2022": 0,
+  "2023": 0,
+  "2024": 1,
+  "2025": 2,
+  "2026": 4
+ },
+ "items": [
+  {
+   "id": "20ade950-5911-421a-aa35-70347b7d85b9",
+   "external_id": "v9r9ty4xuy",
+   "filename": "0902134380009926.pdf",
+   "created_date": "2024-10-21T15:46:13Z",
+   "last_update_date": "2025-05-17T07:38:06Z",
+   "size_in_bytes": 532161,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/v9r9ty4xuy/pdf/0902134380009926.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2013-08-02T05:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "14"
+    ],
+    "municipalityName": [
+     "AMHERST  (CORRECTED COPY)"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "AMHERST  (CORRECTED COPY) 2013 14"
+    ],
+    "subject1": [],
+    "year": []
+   }
+  },
+  {
+   "id": "81db2d8f-96e7-4c3b-aca5-3c187fe6459c",
+   "external_id": "wpjhbktovp",
+   "filename": "090213438000d774.pdf",
+   "created_date": "2024-10-18T19:55:36Z",
+   "last_update_date": "2025-05-17T06:27:20Z",
+   "size_in_bytes": 113104,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/wpjhbktovp/pdf/090213438000d774.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2008-01-30T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "BATAVIA"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "BATAVIA 2008 1"
+    ],
+    "subject1": [],
+    "year": []
+   }
+  },
+  {
+   "id": "ff4f2ea5-6c8d-4aee-b97d-2b2f3be127c0",
+   "external_id": "hms9z8zvgw",
+   "filename": "090213438000f96e.pdf",
+   "created_date": "2024-10-16T19:06:51Z",
+   "last_update_date": "2025-05-17T08:46:23Z",
+   "size_in_bytes": 108741,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/hms9z8zvgw/pdf/090213438000f96e.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2007-03-02T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "SOUTH NYACK"
+    ],
+    "municipalityType": [
+     "Village"
+    ],
+    "subject": [
+     "SOUTH NYACK 2007 1"
+    ],
+    "subject1": [],
+    "year": []
+   }
+  },
+  {
+   "id": "19012f26-c16e-431e-995e-d2367a4e99f5",
+   "external_id": "dks7jl4gl3",
+   "filename": "090213438001c3dd.pdf",
+   "created_date": "2024-10-16T18:55:58Z",
+   "last_update_date": "2025-05-17T10:21:52Z",
+   "size_in_bytes": 158453,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/dks7jl4gl3/pdf/090213438001c3dd.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2006-02-27T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "LEWIS (LEWIS CO)"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "LEWIS (LEWIS CO) 2006 1"
+    ],
+    "subject1": [],
+    "year": []
+   }
+  },
+  {
+   "id": "e0074be6-980b-4806-8f6f-7d46386c491a",
+   "external_id": "qw3qhukhvj",
+   "filename": "0902134380038669.pdf",
+   "created_date": "2024-10-18T19:35:40Z",
+   "last_update_date": "2025-05-17T03:08:38Z",
+   "size_in_bytes": 156658,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/qw3qhukhvj/pdf/0902134380038669.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2003-01-21T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "BRIGHTON"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "BRIGHTON 2003 1"
+    ],
+    "subject1": [],
+    "year": []
+   }
+  },
+  {
+   "id": "06b31711-25b7-4fb8-9cd6-dd8133651ff4",
+   "external_id": "kev02caec6",
+   "filename": "090213438003dcc1.pdf",
+   "created_date": "2024-10-18T19:02:05Z",
+   "last_update_date": "2025-05-17T02:39:46Z",
+   "size_in_bytes": 2467573,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/kev02caec6/pdf/090213438003dcc1.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "1995-03-24T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "2"
+    ],
+    "municipalityName": [
+     "PAWLING"
+    ],
+    "municipalityType": [
+     "Village"
+    ],
+    "subject": [
+     "PAWLING 1995 2"
+    ],
+    "subject1": [],
+    "year": []
+   }
+  },
+  {
+   "id": "06d13bcc-3a28-42f6-8f31-d57af92d0d48",
+   "external_id": "kwmfjiyhzr",
+   "filename": "090213438003dcca.pdf",
+   "created_date": "2024-10-18T19:02:05Z",
+   "last_update_date": "2025-05-17T16:43:15Z",
+   "size_in_bytes": 83702,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/kwmfjiyhzr/pdf/090213438003dcca.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "1997-06-30T05:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "4"
+    ],
+    "municipalityName": [
+     "POUGHKEEPSIE"
+    ],
+    "municipalityType": [
+     "City"
+    ],
+    "subject": [
+     "POUGHKEEPSIE 1997 4"
+    ],
+    "subject1": [],
+    "year": []
+   }
+  },
+  {
+   "id": "1d7143a5-6a0c-4fd6-9967-55e964d878bd",
+   "external_id": "poamg5mdqg",
+   "filename": "090213438003dccb.pdf",
+   "created_date": "2024-10-18T19:02:05Z",
+   "last_update_date": "2025-05-17T16:22:50Z",
+   "size_in_bytes": 185231,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/poamg5mdqg/pdf/090213438003dccb.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "1997-11-24T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "5"
+    ],
+    "municipalityName": [
+     "POUGHKEEPSIE"
+    ],
+    "municipalityType": [
+     "City"
+    ],
+    "subject": [
+     "POUGHKEEPSIE 1997 5"
+    ],
+    "subject1": [],
+    "year": []
+   }
+  },
+  {
+   "id": "9e36f9b8-1453-4a6c-bcd8-410e855c2fea",
+   "external_id": "dbwoqjfugy",
+   "filename": "09021343800682ff.pdf",
+   "created_date": "2024-10-18T18:28:19Z",
+   "last_update_date": "2025-05-17T02:07:14Z",
+   "size_in_bytes": 116730,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/dbwoqjfugy/pdf/09021343800682ff.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "1999-05-20T05:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "BATAVIA"
+    ],
+    "municipalityType": [
+     "City"
+    ],
+    "subject": [
+     "BATAVIA 1999 1"
+    ],
+    "subject1": [],
+    "year": []
+   }
+  },
+  {
+   "id": "1f13b49d-b46b-4e62-8ca2-4d5153db8554",
+   "external_id": "abgsphpx6u",
+   "filename": "0902134380069747.pdf",
+   "created_date": "2024-10-16T18:11:46Z",
+   "last_update_date": "2025-05-17T14:27:43Z",
+   "size_in_bytes": 135662,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/abgsphpx6u/pdf/0902134380069747.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "1999-01-15T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "HEMPSTEAD"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "HEMPSTEAD 1999 1"
+    ],
+    "subject1": [],
+    "year": []
+   }
+  },
+  {
+   "id": "6b0eb087-31d3-45bb-8c3e-f9233cfde9c0",
+   "external_id": "zvzvqkih7p",
+   "filename": "09021343800cf44e.pdf",
+   "created_date": "2024-10-16T21:34:22Z",
+   "last_update_date": "2025-05-17T02:41:24Z",
+   "size_in_bytes": 200839,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/zvzvqkih7p/pdf/09021343800cf44e.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2015-01-21T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "HEMPSTEAD"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "HEMPSTEAD20151"
+    ],
+    "subject1": [
+     "TO AMEND CHAPTER TWO HUNDRED TWO OF THE CODE OF THE TOWN OF HEMPSTEAD AS CONSTITUTED BY LOCAL LAW NUMBER ONE OF NINETEEN HUNDRED AND SIXTY NINE, TO INCLUDE AND REPEAL REGULATIONS AND RESTRICTIONS TO LIMIT PARKING AT VARIOUS LOCATIONS"
+    ],
+    "year": []
+   }
+  },
+  {
+   "id": "dc678f83-24ad-4691-9760-c2af84879403",
+   "external_id": "5apkei6f7l",
+   "filename": "09021343800dcab1.pdf",
+   "created_date": "2024-10-21T19:07:41Z",
+   "last_update_date": "2025-05-17T00:02:06Z",
+   "size_in_bytes": 152002,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/5apkei6f7l/pdf/09021343800dcab1.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2015-04-03T05:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "BATAVIA"
+    ],
+    "municipalityType": [
+     "City"
+    ],
+    "subject": [
+     "BATAVIA20151"
+    ],
+    "subject1": [
+     "A LOCAL LAW TO AMEND 184-419(A) (B) (C) AND (O) OF THE CODE OF THE CITY OF BATAVIA TO ESTABLISH NEW WATER RATES METER FEES AND A CAPITAL IMPROVEMENT FEE"
+    ],
+    "year": []
+   }
+  },
+  {
+   "id": "5a64fbbc-61b1-4222-93e0-2953fc0f1631",
+   "external_id": "nbxwextcgt",
+   "filename": "090213438010451e.pdf",
+   "created_date": "2024-10-16T19:55:32Z",
+   "last_update_date": "2025-05-20T14:12:40Z",
+   "size_in_bytes": 423053,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/nbxwextcgt/pdf/090213438010451e.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2015-12-22T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [],
+    "municipalityName": [
+     "East Hampton"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "EastHampton"
+    ],
+    "subject1": [
+     "Providing for the addition of a new Chapter 199 Rental Registry, establishing a rental registry"
+    ],
+    "year": []
+   }
+  },
+  {
+   "id": "96b7b755-1512-424a-8d1b-6969e127149e",
+   "external_id": "jpl5gohg3u",
+   "filename": "0902134380110542.pdf",
+   "created_date": "2024-10-22T19:40:08Z",
+   "last_update_date": "2025-05-16T23:15:19Z",
+   "size_in_bytes": 141157,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/jpl5gohg3u/pdf/0902134380110542.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2016-03-11T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "VILLAGE OF THE BRANCH"
+    ],
+    "municipalityType": [
+     "Village"
+    ],
+    "subject": [
+     "VILLAGE OF THE BRANCH20161"
+    ],
+    "subject1": [
+     "TAX CAP OVERRIDE"
+    ],
+    "year": []
+   }
+  },
+  {
+   "id": "84b708d7-51b4-4433-8c4a-50e77fbeb48b",
+   "external_id": "a3shl2jvmz",
+   "filename": "090213438026addd.pdf",
+   "created_date": "2024-10-15T18:13:13Z",
+   "last_update_date": "2025-05-16T20:21:40Z",
+   "size_in_bytes": 359456,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/a3shl2jvmz/pdf/090213438026addd.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2019-06-19T05:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "CHESTER (WARREN COUNTY)"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "CHESTER (WARREN COUNTY)20191"
+    ],
+    "subject1": [
+     "TO ESTABLISHING PROPERTY MAINTENANCE LOCAL LAW"
+    ],
+    "year": [
+     "2019"
+    ]
+   }
+  },
+  {
+   "id": "3ba9aa84-d8d1-4353-a911-785b6f50911f",
+   "external_id": "xsrahk2kif",
+   "filename": "09021343802b170b.pdf",
+   "created_date": "2024-10-16T12:41:48Z",
+   "last_update_date": "2025-05-16T19:43:03Z",
+   "size_in_bytes": 298757,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/xsrahk2kif/pdf/09021343802b170b.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2020-04-02T05:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "BATAVIA"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "BATAVIA20201"
+    ],
+    "subject1": [
+     "ESTABLISHING AN INVESTMENT POLICY FOR THE TOWN OF BATAVIA"
+    ],
+    "year": [
+     "2020"
+    ]
+   }
+  },
+  {
+   "id": "904c0fe2-3cbc-4570-aab6-2c34a0998a1e",
+   "external_id": "rwyojmdhz4",
+   "filename": "09021343802f7ae6.pdf",
+   "created_date": "2024-10-16T16:44:22Z",
+   "last_update_date": "2025-05-16T18:53:26Z",
+   "size_in_bytes": 198493,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/rwyojmdhz4/pdf/09021343802f7ae6.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2021-06-16T05:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "55"
+    ],
+    "municipalityName": [
+     "NEW YORK"
+    ],
+    "municipalityType": [
+     "City"
+    ],
+    "subject": [
+     "NEW YORK202155"
+    ],
+    "subject1": [
+     "TO AMEND THE ADMINISTRATIVE CODE OF THE CITY OF NEW YORK, IN RELATION TO THE OPEN STREETS PROGRAM"
+    ],
+    "year": [
+     "2021"
+    ]
+   }
+  },
+  {
+   "id": "e7869e51-fc4e-4d75-b0b1-9afb35555192",
+   "external_id": "nblpmri2jj",
+   "filename": "0902134380343917.pdf",
+   "created_date": "2024-10-18T13:37:38Z",
+   "last_update_date": "2025-05-16T16:11:05Z",
+   "size_in_bytes": 119083,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/nblpmri2jj/pdf/0902134380343917.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2024-03-19T05:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "BATAVIA"
+    ],
+    "municipalityType": [
+     "City"
+    ],
+    "subject": [
+     "BATAVIA20241"
+    ],
+    "subject1": [
+     "TO AMEND 184-41 (A), (B), (C), AND (O) OF THE CODE OF THE CITY OF BATAVIA TO ESTABLISH NEW WATER RATES, METER FEES AND A CAPITAL IMPROVEMENT FEE"
+    ],
+    "year": [
+     "2024"
+    ]
+   }
+  },
+  {
+   "id": "0a6774f8-04fd-49cb-8843-cea0f9c6ff25",
+   "external_id": "rxyo6eejah",
+   "filename": "0902134380363de8.pdf",
+   "created_date": "2025-07-08T14:18:14Z",
+   "last_update_date": "2025-08-07T12:27:53Z",
+   "size_in_bytes": 114543,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/rxyo6eejah/pdf/0902134380363de8.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2025-01-22T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "2"
+    ],
+    "municipalityName": [
+     "HEMPSTEAD"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "HEMPSTEAD20252"
+    ],
+    "subject1": [
+     "PARKING OR STANDING PROHIBITIONS IN UNIONDALE - (TO AMEND SECTION 202-1 OF THE CODE OF THE TOWN OF HEMPSTEAD)"
+    ],
+    "year": [
+     "2025"
+    ]
+   }
+  },
+  {
+   "id": "7cc46106-a65f-477e-b040-16617e5a03d2",
+   "external_id": "d4y6q2jkjl",
+   "filename": "090213438036563e.pdf",
+   "created_date": "2025-07-08T14:19:05Z",
+   "last_update_date": "2025-08-07T12:26:49Z",
+   "size_in_bytes": 579629,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/d4y6q2jkjl/pdf/090213438036563e.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2025-01-28T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "BATAVIA"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "BATAVIA20251"
+    ],
+    "subject1": [
+     "TO ENACT A BATTERY ENERGY STORAGE SYSTEM LAW"
+    ],
+    "year": [
+     "2025"
+    ]
+   }
+  },
+  {
+   "id": "4082f9a7-2221-41d8-b4f0-968f2c8f0bb2",
+   "external_id": "ncslvhk2xr",
+   "filename": "09021343803b7aa9.pdf",
+   "created_date": "2026-01-17T02:30:49Z",
+   "last_update_date": "2026-01-17T02:30:49Z",
+   "size_in_bytes": 93586,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/ncslvhk2xr/pdf/09021343803b7aa9.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2026-01-13T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "1"
+    ],
+    "municipalityName": [
+     "BUFFALO"
+    ],
+    "municipalityType": [
+     "City"
+    ],
+    "subject": [
+     "BUFFALO20261"
+    ],
+    "subject1": [
+     "AMENDING ARTICLE 24 OF THE CHARTER OF THE CITY OF BUFFALO TO EXXEMPT THE TITLE OF DIRECTOR OF STATEWIDE LEGISLATIVE AFFAIRS FROM THE RESIDENCY REQUIREMENT"
+    ],
+    "year": [
+     "2026"
+    ]
+   }
+  },
+  {
+   "id": "69b569dc-db15-4923-a796-578b01549a4d",
+   "external_id": "ddw71kydf4",
+   "filename": "09021343803c5ac8.pdf",
+   "created_date": "2026-03-11T02:30:57Z",
+   "last_update_date": "2026-03-11T02:30:57Z",
+   "size_in_bytes": 99915,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/ddw71kydf4/pdf/09021343803c5ac8.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2026-03-02T06:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "21"
+    ],
+    "municipalityName": [
+     "HEMPSTEAD"
+    ],
+    "municipalityType": [
+     "Town"
+    ],
+    "subject": [
+     "HEMPSTEAD202621"
+    ],
+    "subject1": [
+     "TO AMEND SECTION 202-1 OF THE CODE OF THE TOWN OF HEMPSTEAD AS CONSTITUTED BY LOCAL LAW NUMBER ONE OF NINETEEN HUNDRED AND SIXTY-NINE, TO INCLUDE AND REPEAL \"PARKING OR STANDING PROHIBITIONS\" AT VARIOUS LOCATIONS IN BALDWIN, INWOOD, UNIONDALE & (NR) VALLEY STREAM"
+    ],
+    "year": [
+     "2026"
+    ]
+   }
+  },
+  {
+   "id": "8edf5ce1-8c80-4327-a0c4-d54af3d30c6d",
+   "external_id": "llzl9h06g5",
+   "filename": "09021343803c6660.pdf",
+   "created_date": "2026-03-14T02:31:26Z",
+   "last_update_date": "2026-03-14T02:31:26Z",
+   "size_in_bytes": 125018,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/llzl9h06g5/pdf/09021343803c6660.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2026-03-10T05:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "66"
+    ],
+    "municipalityName": [
+     "NEW YORK"
+    ],
+    "municipalityType": [
+     "City"
+    ],
+    "subject": [
+     "NEW YORK202666"
+    ],
+    "subject1": [
+     "TO AMEND THE ADMINISTRATIVE CODE OF THE CITY OF NEW YORK, IN RELATION TO THE CITYWIDE PERCENTAGE OF RENTAL UNITS IN PROJECTS RECEIVING CITY FINANCIAL ASSISTANCE THAT MUST BE AFFORDABLE FOR EXTREMELY LOW INCOME AND VERY LOW INCOME HOUSEHOLDS"
+    ],
+    "year": [
+     "2026"
+    ]
+   }
+  },
+  {
+   "id": "6216b4c7-c288-47ed-aff3-72bc473c6ae6",
+   "external_id": "dztzxlzgwc",
+   "filename": "09021343803e6ba8.pdf",
+   "created_date": "2026-07-14T02:30:53Z",
+   "last_update_date": "2026-07-14T02:30:53Z",
+   "size_in_bytes": 90654,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/dztzxlzgwc/pdf/09021343803e6ba8.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [],
+    "dateFiled": [
+     "2026-07-06T05:00:00Z"
+    ],
+    "enactedThrough": [],
+    "lawNumber": [
+     "110"
+    ],
+    "municipalityName": [
+     "NEW YORK"
+    ],
+    "municipalityType": [
+     "City"
+    ],
+    "subject": [
+     "NEW YORK2026110"
+    ],
+    "subject1": [
+     "TO AMEND THE ADMINISTRATIVE COE OF THE CITY OF NEW YORK IN RELATION TO REQUIRING A DESIGNATE AGENCY TO DEVELOP AND IMPLEMENT A CULTURAL PASSPORT PROGRAM ENCOURAGING VISITATION TO PARTIDIPATING SITES IN EACH BOROUGH"
+    ],
+    "year": [
+     "2026"
+    ]
+   }
+  },
+  {
+   "id": "5f6cb9ee-2154-4fc4-bfc0-2fbedc8508da",
+   "external_id": "gsqozlcfba",
+   "filename": "{D057F6FC-1C21-46BC-9209-82F8DD971993}.pdf",
+   "created_date": "2024-10-22T16:42:02Z",
+   "last_update_date": "2025-07-01T17:27:22Z",
+   "size_in_bytes": 52920235,
+   "current_version": true,
+   "deleted_date": null,
+   "released_and_not_expired": true,
+   "share": "https://itswebny.widen.net/content/gsqozlcfba/pdf/D057F6FC-1C21-46BC-9209-82F8DD971993.pdf?u=ocgj46&x.share=t",
+   "fields": {
+    "countyLawType": [
+     "Codification"
+    ],
+    "countyMuncipalName": [],
+    "countyMunicipalType": [
+     "County"
+    ],
+    "dateFiled": [
+     "2010-11-01T05:00:00Z"
+    ],
+    "enactedThrough": [
+     "2015-06-16T05:00:00Z"
+    ],
+    "lawNumber": [
+     "2"
+    ],
+    "municipalityName": [
+     "Saratoga"
+    ],
+    "municipalityType": [
+     "County"
+    ],
+    "subject": [
+     "Saratoga County Code"
+    ],
+    "subject1": [
+     "The Saratoga Code contains all currently effective legislation of a general and permanent nature."
+    ],
+    "year": []
+   }
+  }
+ ]
+}

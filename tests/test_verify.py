@@ -6,7 +6,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from conftest import ORG02, FakeFetcher
+from conftest import NY_SAMPLE, ORG02, FakeFetcher
 from local_laws import census, locus
 from local_laws.build import SORT_KEYS, manifest_text, summarize
 from local_laws.card import render
@@ -15,7 +15,8 @@ from local_laws.schema import TABLES
 from local_laws.store import CARD, MANIFEST, sha256_file, write_parquet
 from local_laws.verify import verify
 
-GOVERNMENTS, CROSSWALK = TABLES["governments"]["file"], TABLES["locus_crosswalk"]["file"]
+GOVERNMENTS, CROSSWALK, NY = TABLES["governments"]["file"], TABLES["locus_crosswalk"]["file"], TABLES["ny_local_laws"]["file"]
+ROWS = {"governments": 50, "locus_crosswalk": 25, "ny_local_laws": NY_SAMPLE["total"]}
 
 
 def check(store, stated=None, fetcher=True):
@@ -48,7 +49,7 @@ def reseal(store):
             manifest["files"][spec["file"]] = write_parquet(tables[name], store.root / spec["file"], spec["schema"], SORT_KEYS[name])
         manifest["sources"]["census_governments"]["rows"] = len(tables["governments"])
         try:
-            manifest["stats"] = json.loads(json.dumps(summarize(tables["governments"], tables["locus_crosswalk"])))
+            manifest["stats"] = json.loads(json.dumps(summarize(tables["governments"], tables["locus_crosswalk"], tables["ny_local_laws"])))
         except KeyError:
             pass  # a government_type summarize has no column for; verify names it
 
@@ -63,7 +64,7 @@ def row(rows, **match):
 def test_a_clean_build_has_no_problems(published):
     store, manifest = published
     report = verify(store, fetcher=FakeFetcher(), stated_rows=lambda: manifest["sources"]["locus"]["rows"])
-    assert report == {"rows": {"governments": 50, "locus_crosswalk": 25}, "org02_counts_compared": 312, "locus_stated_rows": manifest["sources"]["locus"]["rows"], "problems": []}
+    assert report == {"rows": ROWS, "org02_counts_compared": 312, "locus_stated_rows": manifest["sources"]["locus"]["rows"], "problems": []}
 
 
 @pytest.mark.parametrize("edit, expected", [
@@ -105,6 +106,50 @@ def test_each_planted_crosswalk_defect_is_named_even_in_a_consistent_manifest(pu
     edit_table(store, "locus_crosswalk", edit)
     reseal(store)
     assert any(problem.startswith(expected) for problem in check(store)), check(store)
+
+
+def matched(rows, kind="Town"):
+    return next(r for r in rows if r["census_id"] and r["municipality_type"] == kind)
+
+
+def unmatched(rows):
+    return next(r for r in rows if r["match"] == "unmatched")
+
+
+@pytest.mark.parametrize("edit, expected", [
+    (lambda rows: rows.append(dict(rows[0])), "ny_local_laws: duplicate asset_id: 1 ("),
+    (lambda rows: rows[0].update(asset_id=None), "ny_local_laws: 1 rows without asset_id"),
+    (lambda rows: rows.pop(), f"ny_local_laws: {NY_SAMPLE['total'] - 1:,} rows; the API counted {NY_SAMPLE['total']} filings at the harvest"),
+    (lambda rows: rows.pop(), "ny_local_laws: filings by year differ from the API's counts at the harvest in 1 ("),
+    (lambda rows: rows[0].update(share_url=rows[0]["share_url"] + "&Signature=abc&Expires=1"), "ny_local_laws: share_url is not the Department's public link: 1 ("),
+    (lambda rows: rows[0].update(share_url=None), "ny_local_laws: share_url is not the Department's public link: 1 ("),
+    (lambda rows: rows[0].update(match="guess"), "ny_local_laws: match values ['guess'] are not among"),
+    (lambda rows: matched(rows).update(census_id=None), "ny_local_laws: census_id, match and candidates disagree: 1 ("),
+    (lambda rows: unmatched(rows).update(match="ambiguous"), "ny_local_laws: census_id, match and candidates disagree: 1 ("),
+    (lambda rows: unmatched(rows).update(census_id="170895"), "ny_local_laws: census_id, match and candidates disagree: 1 ("),
+    (lambda rows: matched(rows).update(candidates=["170895"]), "ny_local_laws: census_id, match and candidates disagree: 1 ("),
+    (lambda rows: matched(rows).update(census_id="100001"), "ny_local_laws: census_id is not a New York government in governments: 1 ("),
+    (lambda rows: matched(rows, "Town").update(census_id="109507"), "ny_local_laws: census_id's Census title is not the one municipality_type gives: 1 ("),
+])
+def test_each_planted_ny_defect_is_named_even_in_a_consistent_manifest(published, edit, expected):
+    store, _ = published
+    edit_table(store, "ny_local_laws", edit)
+    reseal(store)
+    assert any(problem.startswith(expected) for problem in check(store)), check(store)
+
+
+def test_ny_counts_that_are_not_the_api_s_are_named(published):
+    store, manifest = published
+    years = manifest["sources"]["ny_local_laws"]["years"]
+    busy = [year for year, n in years.items() if n]
+    moved = dict(years, **{busy[0]: years[busy[0]] - 1, busy[1]: years[busy[1]] + 1})
+    edit_manifest(store, lambda manifest: manifest["sources"]["ny_local_laws"].update(years=moved))
+    assert check(store) == [f"ny_local_laws: filings by year differ from the API's counts at the harvest in 2 ({busy[0]}, {busy[1]})"]
+    total = NY_SAMPLE["total"]
+    edit_manifest(store, lambda manifest: manifest["sources"]["ny_local_laws"].update(years=years, total=total + 1))
+    problems = check(store)
+    assert f"ny_local_laws: the manifest's API counts by year add to {total:,}, not its total {total + 1}" in problems
+    assert f"ny_local_laws: {total:,} rows; the API counted {total + 1} filings at the harvest" in problems
 
 
 def test_a_file_that_is_not_the_manifest_s_is_named(published):
