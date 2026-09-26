@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-laws-research-service-products"
+dynamic = ["version"]
+description = "Builds a Hugging Face dataset of every US local government in the 2022 Census of Governments, with a crosswalk to the ordinance text in LOCUS."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.14"
+# Exact versions: the ones the tests and the published build used.
+dependencies = [
+    "httpx==0.28.1",
+    "openpyxl==3.1.5",
+    "pyarrow==25.0.1",
+    "huggingface_hub==1.32.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest==9.1.1", "PyYAML==6.0.3"]
+
+[tool.setuptools]
+packages = ["local_laws"]
+
+[tool.setuptools.dynamic]
+version = {attr = "local_laws.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
