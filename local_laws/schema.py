@@ -146,9 +146,26 @@ NY_LOCAL_LAW_INDEX_DOCS = {
     "candidates": "When `match` is `ambiguous`, the `census_id` of each government with the title and name; otherwise empty",
 }
 
+FEDERALLY_RECOGNIZED_TRIBES = pa.schema([
+    ("list_row", pa.int64()),
+    ("list", pa.string()),
+    ("entry", pa.string()),
+    ("name", pa.string()),
+    ("previous_entry", pa.string()),
+])
+
+FEDERALLY_RECOGNIZED_TRIBES_DOCS = {
+    "list_row": "The entry's place in the notice, counting from 1 through its list for the contiguous 48 states and on through its list for Alaska. Unique in the table, but not an identifier: another notice numbers its entries afresh",
+    "list": "`contiguous_48` or `alaska`: which of the notice's two lists the entry is in",
+    "entry": "The entry as the notice gives it, with the former names, other names and notes it puts in parentheses, such as Kiowa Tribe (previously listed as Kiowa Indian Tribe of Oklahoma). Each run of spaces and line breaks in the notice's XML is read as one space",
+    "name": "The entry's text before its first parenthesis: the entity's current name, such as Kiowa Tribe",
+    "previous_entry": "The entry of the notice this list updates that this one continues: the same entry, the one its \"previously listed as\" gives, or that entry with its parentheticals dropped, compared without spaces or capitals, since that notice's XML sometimes breaks a word or spaces a parenthesis. Null for an entity the earlier list did not have",
+}
+
 TABLES = {
     "governments": {"file": "data/governments.parquet", "schema": GOVERNMENTS, "docs": GOVERNMENT_DOCS},
     "locus_crosswalk": {"file": "data/locus_crosswalk.parquet", "schema": LOCUS_CROSSWALK, "docs": LOCUS_DOCS},
     "ny_local_laws": {"file": "data/ny_local_laws.parquet", "schema": NY_LOCAL_LAWS, "docs": NY_LOCAL_LAW_DOCS},
     "ny_local_law_index": {"file": "data/ny_local_law_index.parquet", "schema": NY_LOCAL_LAW_INDEX, "docs": NY_LOCAL_LAW_INDEX_DOCS},
+    "federally_recognized_tribes": {"file": "data/federally_recognized_tribes.parquet", "schema": FEDERALLY_RECOGNIZED_TRIBES, "docs": FEDERALLY_RECOGNIZED_TRIBES_DOCS},
 }

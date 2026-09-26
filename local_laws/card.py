@@ -3,7 +3,7 @@
 import datetime
 from collections import Counter
 
-from . import GITHUB, REPO_ID, census, locus, nyindex, nylaws, precision
+from . import GITHUB, REPO_ID, census, locus, nyindex, nylaws, precision, tribes
 from .schema import TABLES
 
 TITLE = "US Local Governments and Ordinance Coverage"
@@ -22,6 +22,7 @@ NY_DISCLAIMER = "https://dos.ny.gov/disclaimer"
 # Read by paging through the API's filings filed in 2020 on September 26, 2026, when the whole API counted 147,844 assets and the category 147,795.
 NY_OUTSIDE = "On September 26, 2026 the API also held 49 filings outside the search's Local Laws category, which the search does not show and which are not rows: filed from December 23 to 29, 2020 and all added on October 16, 2024, among them New York City's local laws 120 to 125 of 2020 and Suffolk County's 51 to 56. One, the Town of Stony Creek's local law 3 of 2020, is also in the category, filed again under a shorter title; for the other 48, no filing in the category from 2020 or 2021 has the same government, number and a like title."
 CFR_TITLES = "https://www.govinfo.gov/content/pkg/CFR-2025-title37-vol1/xml/CFR-2025-title37-vol1-sec202-1.xml"
+USC_105 = "https://www.copyright.gov/title17/92chap1.html#105"
 NY_TITLES = {"TOWN OF": "Town", "VILLAGE OF": "Village", "CITY OF": "City", "COUNTY OF": "County"}
 
 
@@ -48,7 +49,7 @@ def moment(value):
 
 def front_matter(total):
     lines = ["---", f"pretty_name: {TITLE}", "license: mit", "language:", "- en",
-             "tags:", "- legal", "- government", "- local-government", "- ordinances", "- municipal-codes", "- local-laws", "- new-york", "- census", "- united-states",
+             "tags:", "- legal", "- government", "- local-government", "- ordinances", "- municipal-codes", "- local-laws", "- new-york", "- census", "- tribes", "- united-states",
              "size_categories:", f"- {size_category(total)}", "configs:"]
     for index, (name, spec) in enumerate(TABLES.items()):
         lines += [f"- config_name: {name}", "  data_files:", "  - split: train", f"    path: {spec['file']}"]
@@ -100,6 +101,7 @@ def use():
         f'crosswalk = load_dataset("{REPO_ID}", "locus_crosswalk", split="train")',
         f'ny_laws = load_dataset("{REPO_ID}", "ny_local_laws", split="train")',
         f'ny_index = load_dataset("{REPO_ID}", "ny_local_law_index", split="train")',
+        f'tribes = load_dataset("{REPO_ID}", "federally_recognized_tribes", split="train")',
         "```",
         "",
         "```sql",
@@ -132,12 +134,20 @@ def use():
         f"SELECT law_year, law_number, date_filed, title FROM '{base}/ny_local_law_index.parquet' WHERE census_id = '170895' ORDER BY date_filed, index_row LIMIT 20;",
         "```",
         "",
+        "```sql",
+        "-- The federally recognized Tribes in Alaska, in the Bureau of Indian Affairs' order",
+        f"SELECT list_row, name, entry FROM '{base}/federally_recognized_tribes.parquet' WHERE list = 'alaska' ORDER BY list_row;",
+        "",
+        "-- The entries that are new, or changed other than in spaces and capitals, since the Bureau's previous list",
+        f"SELECT name, previous_entry FROM '{base}/federally_recognized_tribes.parquet' WHERE previous_entry IS NULL OR replace(lower(previous_entry), ' ', '') <> replace(lower(entry), ' ', '') ORDER BY list_row;",
+        "```",
+        "",
     ]
 
 
 def files(manifest):
     entries = manifest["files"]
-    governments, crosswalk, ny, index = (entries[TABLES[name]["file"]] for name in ("governments", "locus_crosswalk", "ny_local_laws", "ny_local_law_index"))
+    governments, crosswalk, ny, index, recognized = (entries[TABLES[name]["file"]] for name in ("governments", "locus_crosswalk", "ny_local_laws", "ny_local_law_index", "federally_recognized_tribes"))
     return [
         "## Files",
         "",
@@ -145,6 +155,7 @@ def files(manifest):
         f"- `{TABLES['locus_crosswalk']['file']}`: one row per LOCUS jurisdiction, {crosswalk['rows']:,} rows, sorted by state, type and name.",
         f"- `{TABLES['ny_local_laws']['file']}`: one row per filing in New York's local-law search, {ny['rows']:,} rows, sorted by `filename`.",
         f"- `{TABLES['ny_local_law_index']['file']}`: one row per record in New York's older index of local laws, {index['rows']:,} rows, sorted by `index_row`.",
+        f"- `{TABLES['federally_recognized_tribes']['file']}`: one row per entry of the Bureau of Indian Affairs' list of federally recognized Tribes, {recognized['rows']:,} rows, sorted by `list_row`.",
         "- `manifest.json`: each source's URL and SHA-256 or commit (for New York's API, when it was read and the counts it gave then), each file's rows and SHA-256, every normalization the build applied with its count, the counts on this card, and the pipeline version and commit that built them.",
         "",
         "## Schema",
@@ -309,6 +320,52 @@ def index_misdated(index):
     return f" {before:,} {'row has' if before == 1 else 'rows have'} a filing date before the law's own year, so one of the two is wrong, and {after:,} a filing date after the day the record was entered; the table keeps the dates as recorded."
 
 
+def recognized_tribes(manifest):
+    table, source = manifest["stats"]["tribes"], manifest["sources"]["federally_recognized_tribes"]
+    lists, added, changed = table["lists"], table["added"], table["changed"]
+    says = f" {tribes.NOTICE_SAYS}" if source["document_number"] == tribes.NOTICE["document_number"] else ""
+    respaced_names = table["respaced_names"]
+    same = f", {table['respaced']:,} of them only when spaces and capitals are ignored, {f'{len(respaced_names):,}' if respaced_names else 'none'} of those in the name before any parenthesis" if table["respaced"] else ""
+    return [
+        "## Federally recognized Tribes",
+        "",
+        f"The Census of Governments does not count tribal governments. Under the Federally Recognized Indian Tribe List Act of 1994, the Bureau of Indian Affairs publishes in the Federal Register the list of the Tribal entities it recognizes. `federally_recognized_tribes` is the list in its notice of {day(source['published'])}, [{source['citation']}]({source['page']}), read from the notice's XML at the SHA-256 the build pins: one row per entry, {table['rows']:,} in all, {lists['contiguous_48']:,} in its list for the contiguous 48 states and {lists['alaska']:,} in its list for Alaska, in the notice's order. Each row is a name as the Bureau lists it, with the former names and notes the notice gives in parentheses, and nothing more: no lands, members, offices or laws.",
+        "",
+        stated_count(table, source),
+        "",
+        f"The build checks the list against the notice it says it updates, of {day(source['previous_published'])} ([{source['previous_citation']}]({source['previous_page']})), which had {source['previous_entries']:,} entries: each of them must be continued by exactly one row, as the same entry, as the one the row's \"previously listed as\" names, or with its parentheticals dropped, compared without spaces or capitals; and the rows that continue none must be as many as the stated count grew by. {table['unchanged']:,} entries are the same{same}; {len(changed):,} changed, {f"{table['renamed']:,}" if table['renamed'] else 'none'} of them in the name before any parenthesis; and {f"{len(added):,} {'is' if len(added) == 1 else 'are'} new: {', '.join(added)}" if added else 'none is new'}. `previous_entry` holds each row's earlier entry.{says}",
+        "",
+        f"Changed since the earlier notice: {', '.join(changed) or 'none'}.",
+        "",
+        *respaced(respaced_names),
+    ]
+
+
+def respaced(names):
+    """The sentence on names that differ from the earlier notice's only in spaces or capitals, if any."""
+    if not names:
+        return []
+    listed = "; ".join(f"{current}, which the earlier notice typed {earlier}" for current, earlier in names)
+    return [f"Names that differ from the earlier notice's only in spaces or capitals, kept as each notice types them: {listed}.", ""]
+
+
+def stated_count(table, source):
+    """The paragraph on the count the notice states, beside the entries its lists hold."""
+    rows, stated = table["rows"], source["stated"]
+    said = f"The notice's summary says it publishes \"the current list of {stated} Tribal entities\""
+    if rows == stated:
+        return f"{said}, as many as its lists hold."
+    gap = rows - stated
+    text = f"{said}, {abs(gap):,} {'fewer' if gap > 0 else 'more'} than the {rows:,} entries its lists hold, and the notice it updates stated {source['previous_stated']:,} for {source['previous_entries']:,} entries. Neither says why."
+    referred = table["referred"]
+    if referred:
+        named = "; ".join(f"{' and '.join(others)} to {target}" for target, others in referred.items())
+        text += f" Some entries send the reader to another with \"See\": {named}."
+        if rows - len(referred) == stated:
+            text += f" The stated count is the entries less the {len(referred):,} that others send the reader to, but the notice does not say that is how the Bureau counts, so every entry is a row."
+    return text
+
+
 def repeat_years(ny):
     """(repeats by filing year, the one or two years with the most, and how much of the whole those hold: all, most or the largest shares)."""
     years = {year: entry["repeats"] for year, entry in ny["years"].items() if entry["repeats"]}
@@ -456,7 +513,7 @@ def gaps(manifest):
     lines = [
         "## Known gaps",
         "",
-        "- Tribal governments are not rows. Besides the federal government and the 50 state governments, the Census Bureau \"recognizes five basic types of local governments\" ([technical documentation](" + TECH_DOC + ")), the five in `government_type`, and tribal governments are not among them. Nor are the territories' governments: the Census file covers the 50 states and the District of Columbia.",
+        "- Tribal governments are not rows. Besides the federal government and the 50 state governments, the Census Bureau \"recognizes five basic types of local governments\" ([technical documentation](" + TECH_DOC + ")), the five in `government_type`, and tribal governments are not among them. `federally_recognized_tribes` lists the Tribes the United States recognizes by name only: it does not match them to governments or places, holds none of their laws, and leaves out Tribes that a state recognizes and the United States does not. Nor are the territories' governments rows: the Census file covers the 50 states and the District of Columbia.",
         f"- Dependent public school systems, {notes.get('dependent_school_systems_skipped', 0):,} in the Census file, are left out, as the Census leaves them out of its count: they \"are classified as agencies of other state, county, municipal, or town or township governments and are not counted as separate governments\" ([technical documentation]({TECH_DOC})).",
     ]
     if "ks/howard" in lx["ambiguous"]:
@@ -474,11 +531,17 @@ def gaps(manifest):
         f"- {NY_OUTSIDE}",
         *repeats_gap(stats["ny"]),
         scans(),
+        tribes_gap(manifest["sources"]["federally_recognized_tribes"]),
         "- `ny_local_law_index` is an index: it holds no law's text and no link to a filing, and its titles are not checked against the State's files (see New York's index of older local laws). Its names are as the index records them, some cut short or misspelled, and a village dissolved before 2022 has no government in the 2022 Census of Governments, so such rows are `unmatched`.",
         "- New York filings are matched to governments by the Department's type and name, and the county a name sometimes carries, not by their text; a check of a sample against the text is under New York local laws. A village dissolved before 2022 has no government in the 2022 Census of Governments, and a filing recorded under a name or type the Census does not use is `unmatched`; both are listed under New York local laws.",
         "",
     ]
     return lines
+
+
+def tribes_gap(source):
+    latest = f", the latest the Federal Register's API found on {day(tribes.LATEST_CHECKED)}" if source["document_number"] == tribes.NOTICE["document_number"] else ""
+    return f"- `federally_recognized_tribes` is the Bureau's list as its notice of {day(source['published'])} gives it{latest}: a Tribe recognized, or an entry corrected, since then is not reflected."
 
 
 def repeats_gap(ny):
@@ -499,7 +562,7 @@ def scans():
 
 
 def sources(manifest):
-    census_source, org02, locus_source, ny, index = (manifest["sources"][key] for key in ("census_governments", "census_org02", "locus", "ny_local_laws", "ny_local_law_index"))
+    census_source, org02, locus_source, ny, index, recognized = (manifest["sources"][key] for key in ("census_governments", "census_org02", "locus", "ny_local_laws", "ny_local_law_index", "federally_recognized_tribes"))
     return [
         "## Sources",
         "",
@@ -510,8 +573,10 @@ def sources(manifest):
         f"| [LOCUS-v1]({LOCUS_URL}) | commit `{locus_source['revision']}` | `locus_crosswalk`: {locus_source['rows']:,} rows read |",
         f"| [New York Department of State, Local Laws search]({ny['app']}), through its API `{ny['api']}` | read from {moment(ny['started_at'])} to {moment(ny['finished_at'])}, when it counted {ny['total']:,} filings | `ny_local_laws` |",
         f"| [{nyindex.TITLE}](https://doi.org/{index['doi']}), v1.0.0, from the Local Geohistory Project | SHA-256 `{index['sha256']}` | `ny_local_law_index`: {index['rows']:,} rows, checked against the {index['state_records']:,} records of the State's data file in the release |",
+        f"| Bureau of Indian Affairs, [\"{tribes.TITLE}\"]({recognized['page']}), {recognized['citation']}, {day(recognized['published'])} | SHA-256 `{recognized['sha256']}` of its XML | `federally_recognized_tribes`: {recognized['rows']:,} rows |",
+        f"| The notice it updates, [{recognized['previous_citation']}]({recognized['previous_page']}), {day(recognized['previous_published'])} | SHA-256 `{recognized['previous_sha256']}` of its XML | Checking `federally_recognized_tribes`: its {recognized['previous_entries']:,} entries, each continued by one row |",
         "",
-        "`python -m local_laws run` downloads the Census files, LOCUS and New York's older index at their pinned versions and reads New York's API afresh, or builds from a snapshot of it that `python -m local_laws harvest-ny` wrote. It stops if any source's bytes or counts are not what the pipeline was checked against, and commits the tables, `manifest.json` and this card in one commit. It runs by hand, not on a schedule: the Census files, LOCUS and the index are fixed releases, and a new release needs a person to review it before its pin changes. `python -m local_laws verify` re-reads the published files and checks them against `manifest.json`, the Census's table, LOCUS's card, the API's counts recorded at the reading and the index's release.",
+        "`python -m local_laws run` downloads the Census files, LOCUS, New York's older index and the Bureau's two notices at their pinned versions and reads New York's API afresh, or builds from a snapshot of it that `python -m local_laws harvest-ny` wrote. It stops if any source's bytes or counts are not what the pipeline was checked against, and commits the tables, `manifest.json` and this card in one commit. It runs by hand, not on a schedule: the Census files, LOCUS, the index and the notices are fixed releases, and a new release needs a person to review it before its pin changes. `python -m local_laws verify` re-reads the published files and checks them against `manifest.json`, the Census's table, LOCUS's card, the API's counts recorded at the reading, the index's release and the Bureau's notices.",
         "",
     ]
 
@@ -523,16 +588,18 @@ def by_state(stats):
     return lines + [""]
 
 
-def license_section():
+def license_section(manifest):
+    tribe_source = manifest["sources"]["federally_recognized_tribes"]
     return [
         "## License",
         "",
         "MIT, for the compilation and the code that builds it.",
         "",
-        "- The Census files are works of the United States Government and are not subject to copyright in the United States ([17 U.S.C. § 105](https://www.copyright.gov/title17/92chap1.html#105)).",
+        f"- The Census files are works of the United States Government and are not subject to copyright in the United States ([17 U.S.C. § 105]({USC_105})).",
         f"- The crosswalk records facts about LOCUS-v1, namely its jurisdiction names, their row counts and counts of type words in their text, and holds none of its text. LOCUS licenses its text [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/), which anyone using that text must follow. Cite LOCUS as {LOCUS_CITATION}.",
         f"- `ny_local_laws` records facts about each filing, namely who filed it, its number, its dates, its PDF's name, size and public link, and the law's title as the Department records it, and holds none of the laws' text. Titles are among the \"words and short phrases such as names, titles, and slogans\" that the Copyright Office's rules list as not subject to copyright ([37 C.F.R. § 202.1(a)]({CFR_TITLES})). On September 26, 2026 the Department's Local Laws pages linked no terms of use, its [disclaimer]({NY_DISCLAIMER}) covered only its links to other sites, and the API's host had no robots.txt (it answered HTTP 404).",
         f"- `ny_local_law_index` is the State's older index as the Local Geohistory Project published it, and the [Zenodo record]({nyindex.RECORD}) names its license \"Creative Commons Zero v1.0 Universal\" ([CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)). Its records are the State's: the release's [README]({nyindex.REPOSITORY}) says the DataPerfect files in it \"were created by the State of New York\". Like `ny_local_laws`, the table records facts about each filing, namely who filed it, the law's year and number, its dates and pages, and its title and subject as the State recorded them, and holds none of the laws' text. Cite it as {nyindex.CREATOR}, \"{nyindex.TITLE}\", v1.0.0, Local Geohistory Project, December 31, 2023, [doi:{nyindex.DOI}](https://doi.org/{nyindex.DOI}).",
+        f"- `federally_recognized_tribes` is taken from notices the Bureau of Indian Affairs published in the Federal Register, each signed by its Assistant Secretary—Indian Affairs. They are works of the United States Government, and \"Copyright protection under this title is not available for any work of the United States Government\" ([17 U.S.C. § 105]({USC_105})). Cite the list as Bureau of Indian Affairs, \"{tribes.TITLE}\", {tribe_source['citation']} ({day(tribe_source['published'])}).",
         "",
     ]
 
@@ -544,10 +611,10 @@ def render(manifest):
     lines += [
         f"# {TITLE}",
         "",
-        f"Every local government the Census Bureau's 2022 Census of Governments counts, {stats['governments']:,} of them in the 50 states and the District of Columbia; which of them have ordinance text in [LOCUS]({LOCUS_URL}), a public corpus of local ordinances; and every local law in the New York Department of State's online search, {stats['ny']['filings']:,} filings, with the State's older index of local laws, {stats['ny_index']['rows']:,} rows, each matched where it can be to the government that filed it. It maps who makes local law, how much of that law LOCUS holds, and, for New York, the local laws its governments have filed with the state since 1998 and, in the older index, with law years back to {stats['ny_index']['first_law_year']}; the laws' text is not here.",
+        f"Every local government the Census Bureau's 2022 Census of Governments counts, {stats['governments']:,} of them in the 50 states and the District of Columbia; which of them have ordinance text in [LOCUS]({LOCUS_URL}), a public corpus of local ordinances; and every local law in the New York Department of State's online search, {stats['ny']['filings']:,} filings, with the State's older index of local laws, {stats['ny_index']['rows']:,} rows, each matched where it can be to the government that filed it. It maps who makes local law, how much of that law LOCUS holds, and, for New York, the local laws its governments have filed with the state since 1998 and, in the older index, with law years back to {stats['ny_index']['first_law_year']}; the laws' text is not here. Beside them, `federally_recognized_tribes` lists the {stats['tribes']['rows']:,} entries of the Bureau of Indian Affairs' list of federally recognized Tribes, whose governments the Census does not count among local governments.",
         "",
-        f"Every row is built by code: the Census files, LOCUS and New York's older index from versions pinned by SHA-256 or commit, which the build checks against each other, and the index against the State's own file in its release; and New York's filings from the Department's search API as it answered on {day(ny['finished_at'])}, checked against the API's own counts. The only hand-made input to the rows is {len(locus.ALIASES)} name aliases for LOCUS, listed under Matching. The pipeline and its tests are in [{GITHUB.removeprefix('https://')}]({GITHUB}), and this card is rendered from `manifest.json` in the same commit.",
+        f"Every row is built by code: the Census files, LOCUS and New York's older index from versions pinned by SHA-256 or commit, which the build checks against each other, and the index against the State's own file in its release; the Bureau's list from its notice in the Federal Register, pinned by SHA-256 and checked against the notice it updates; and New York's filings from the Department's search API as it answered on {day(ny['finished_at'])}, checked against the API's own counts. The only hand-made input to the rows is {len(locus.ALIASES)} name aliases for LOCUS, listed under Matching. The pipeline and its tests are in [{GITHUB.removeprefix('https://')}]({GITHUB}), and this card is rendered from `manifest.json` in the same commit.",
         "",
     ]
-    lines += coverage(stats) + new_york(manifest) + ny_index(manifest) + use() + files(manifest) + matching(manifest) + codifiers(manifest) + gaps(manifest) + sources(manifest) + license_section() + by_state(stats)
+    lines += coverage(stats) + new_york(manifest) + ny_index(manifest) + recognized_tribes(manifest) + use() + files(manifest) + matching(manifest) + codifiers(manifest) + gaps(manifest) + sources(manifest) + license_section(manifest) + by_state(stats)
     return "\n".join(lines)

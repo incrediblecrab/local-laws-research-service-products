@@ -1,4 +1,4 @@
-"""Checks a published build: its files against manifest.json, its tables against their schemas and each other, its counts against the Census's own table, LOCUS's card and the New York API's counts at the harvest, New York's index against its release, and its card against a fresh render."""
+"""Checks a published build: its files against manifest.json, its tables against their schemas and each other, its counts against the Census's own table, LOCUS's card and the New York API's counts at the harvest, New York's index against its release, the Tribes against the Bureau of Indian Affairs' notices, and its card against a fresh render."""
 
 import json
 import re
@@ -6,7 +6,7 @@ from collections import Counter
 
 import pyarrow as pa
 
-from . import census, locus, nyindex, nylaws
+from . import census, locus, nyindex, nylaws, tribes
 from .build import summarize
 from .card import render
 from .schema import TABLES
@@ -17,7 +17,7 @@ CENSUS_ID = re.compile(r"\d{6}")
 
 
 def sample(values):
-    values = sorted(values)
+    values = sorted(values, key=lambda value: (value is None, value if value is not None else 0))
     return f"{len(values):,} ({', '.join(map(str, values[:SAMPLE]))}{', ...' if len(values) > SAMPLE else ''})"
 
 
@@ -155,8 +155,61 @@ def compare_ny_index(rows, data, problems):
     return len(state)
 
 
+def check_tribes(rows, source, problems):
+    """source is the manifest's record of the two notices."""
+    name = "federally_recognized_tribes"
+    positions = Counter(row["list_row"] for row in rows)
+    if set(positions) != set(range(1, len(rows) + 1)):
+        repeated = [n for n, count in positions.items() if count > 1]
+        problems.append(f"{name}: list_row is not 1 to {len(rows):,}, once each" + (f"; repeated: {sample(repeated)}" if repeated else ""))
+    order = list(tribes.LISTS)
+    unknown = sorted({row["list"] for row in rows} - set(order), key=str)
+    if unknown:
+        problems.append(f"{name}: list values {unknown} are not among {order}")
+    else:
+        places = [order.index(row["list"]) for row in sorted(rows, key=lambda row: (row["list_row"] is None, row["list_row"] or 0))]
+        if places != sorted(places):
+            problems.append(f"{name}: the lists are not in the notice's order, {' then '.join(order)}")
+    misnamed = [row["list_row"] for row in rows if row["name"] != tribes.name(row["entry"] or "")]
+    if misnamed:
+        problems.append(f"{name}: name is not the entry's text before its first parenthesis: {sample(misnamed)}")
+    continued = Counter((row["list"], row["previous_entry"]) for row in rows if row["previous_entry"] is not None)
+    doubled = [f"{kind}/{entry}" for (kind, entry), n in continued.items() if n > 1]
+    if doubled:
+        problems.append(f"{name}: earlier entries continued by more than one row: {sample(doubled)}")
+    for field in ("rows", "entries"):
+        if len(rows) != source.get(field):
+            problems.append(f"{name}: {len(rows):,} rows; the manifest's source gives {field} {source.get(field)}")
+    counts = {field: source.get(field) for field in ("stated", "entries", "previous_stated", "previous_entries")}
+    if not all(isinstance(value, int) for value in counts.values()):
+        problems.append(f"{name}: the manifest's source gives counts {counts}")
+        return
+    added = sum(1 for row in rows if row["previous_entry"] is None)
+    if added != counts["stated"] - counts["previous_stated"]:
+        problems.append(f"{name}: {added:,} rows continue no earlier entry; the stated count went from {counts['previous_stated']:,} to {counts['stated']:,}")
+    if len(rows) - added != counts["previous_entries"]:
+        problems.append(f"{name}: {len(rows) - added:,} rows continue an earlier entry; the manifest's source gives the earlier notice {counts['previous_entries']:,} entries")
+
+
+def compare_tribes(rows, fetcher, source, problems):
+    """The published rows against the two notices, downloaded again at their pinned SHA-256: every row, field for field, what the build takes from them, and the manifest's counts what they hold."""
+    notice, previous, fresh = tribes.load(fetcher)
+    expected = {row["list_row"]: row for row in fresh}
+    changed = [row["list_row"] for row in rows if {field: row[field] for field in tribes.FIELDS} != expected.get(row["list_row"])]
+    if changed:
+        problems.append(f"federally_recognized_tribes: rows that are not the notice's entry at their list_row: {sample(changed)}")
+    missing = sorted(set(expected) - {row["list_row"] for row in rows})
+    if missing:
+        problems.append(f"federally_recognized_tribes: entries of the notice not in the table: {sample(missing)}")
+    counts = {"stated": notice["stated"], "entries": len(notice["entries"]), "previous_stated": previous["stated"], "previous_entries": len(previous["entries"])}
+    differing = sorted(field for field, value in counts.items() if source.get(field) != value)
+    if differing:
+        problems.append(f"federally_recognized_tribes: the manifest's source differs from the notices in {differing}")
+    return len(fresh)
+
+
 def verify(store, fetcher=None, stated_rows=None):
-    """A report whose "problems" is empty when every check passed. With a fetcher, CG2200ORG02 and New York's index are downloaded again and compared; with stated_rows (a callable), LOCUS's card is read again."""
+    """A report whose "problems" is empty when every check passed. With a fetcher, CG2200ORG02, New York's index and the Bureau of Indian Affairs' two notices are downloaded again and compared; with stated_rows (a callable), LOCUS's card is read again."""
     text = store.read_text(MANIFEST)
     if text is None:
         return {"problems": [f"no {MANIFEST}"]}
@@ -198,7 +251,8 @@ def verify(store, fetcher=None, stated_rows=None):
         tables[name] = table.to_pylist()
     report = {"rows": {name: len(rows) for name, rows in tables.items()}}
     sources = manifest.get("sources") or {}
-    pins = {("census_governments", "sha256"): census.GOVT_UNITS_SHA256, ("census_org02", "sha256"): census.ORG02_SHA256, ("locus", "revision"): locus.REVISION, ("ny_local_law_index", "sha256"): nyindex.SHA256}
+    pins = {("census_governments", "sha256"): census.GOVT_UNITS_SHA256, ("census_org02", "sha256"): census.ORG02_SHA256, ("locus", "revision"): locus.REVISION, ("ny_local_law_index", "sha256"): nyindex.SHA256,
+            ("federally_recognized_tribes", "sha256"): tribes.NOTICE["sha256"], ("federally_recognized_tribes", "previous_sha256"): tribes.PREVIOUS["sha256"]}
     for (source, field), pin in pins.items():
         if (sources.get(source) or {}).get(field) != pin:
             problems.append(f"the manifest's {source} {field} is {(sources.get(source) or {}).get(field)!r}; this code pins {pin}")
@@ -232,9 +286,14 @@ def verify(store, fetcher=None, stated_rows=None):
         check_ny_index(index, governments, sources.get("ny_local_law_index") or {}, problems)
         if fetcher is not None:
             report["ny_index_state_records"] = compare_ny_index(index, nyindex.download(fetcher), problems)
-    if governments is not None and crosswalk is not None and ny is not None and index is not None:
+    recognized = tables.get("federally_recognized_tribes")
+    if recognized is not None:
+        check_tribes(recognized, sources.get("federally_recognized_tribes") or {}, problems)
+        if fetcher is not None:
+            report["tribes_notice_entries"] = compare_tribes(recognized, fetcher, sources.get("federally_recognized_tribes") or {}, problems)
+    if governments is not None and crosswalk is not None and ny is not None and index is not None and recognized is not None:
         try:
-            stats = json.loads(json.dumps(summarize(governments, crosswalk, ny, index)))
+            stats = json.loads(json.dumps(summarize(governments, crosswalk, ny, index, recognized)))
         except (KeyError, TypeError) as error:
             problems.append(f"the manifest's stats cannot be recomputed from the tables: {type(error).__name__}: {error}")
         else:

@@ -6,8 +6,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from conftest import NY_INDEX, NY_SAMPLE, ORG02, FakeFetcher, sha256
-from local_laws import census, locus, nyindex
+from conftest import NY_INDEX, NY_SAMPLE, ORG02, TRIBES_NOTICE, TRIBES_PREVIOUS, FakeFetcher, sha256
+from local_laws import census, locus, nyindex, tribes
 from local_laws.build import SORT_KEYS, manifest_text, summarize
 from local_laws.card import render
 from local_laws.census import SourceChanged
@@ -16,7 +16,7 @@ from local_laws.store import CARD, MANIFEST, sha256_file, write_parquet
 from local_laws.verify import verify
 
 GOVERNMENTS, CROSSWALK, NY = TABLES["governments"]["file"], TABLES["locus_crosswalk"]["file"], TABLES["ny_local_laws"]["file"]
-ROWS = {"governments": 50, "locus_crosswalk": 25, "ny_local_laws": NY_SAMPLE["total"], "ny_local_law_index": 14}
+ROWS = {"governments": 50, "locus_crosswalk": 25, "ny_local_laws": NY_SAMPLE["total"], "ny_local_law_index": 14, "federally_recognized_tribes": 19}
 
 
 def check(store, stated=None, fetcher=True):
@@ -49,7 +49,7 @@ def reseal(store):
             manifest["files"][spec["file"]] = write_parquet(tables[name], store.root / spec["file"], spec["schema"], SORT_KEYS[name])
         manifest["sources"]["census_governments"]["rows"] = len(tables["governments"])
         try:
-            manifest["stats"] = json.loads(json.dumps(summarize(tables["governments"], tables["locus_crosswalk"], tables["ny_local_laws"], tables["ny_local_law_index"])))
+            manifest["stats"] = json.loads(json.dumps(summarize(*(tables[name] for name in TABLES))))
         except KeyError:
             pass  # a government_type summarize has no column for; verify names it
 
@@ -64,7 +64,7 @@ def row(rows, **match):
 def test_a_clean_build_has_no_problems(published):
     store, manifest = published
     report = verify(store, fetcher=FakeFetcher(), stated_rows=lambda: manifest["sources"]["locus"]["rows"])
-    assert report == {"rows": ROWS, "org02_counts_compared": 312, "locus_stated_rows": manifest["sources"]["locus"]["rows"], "ny_index_state_records": 14, "problems": []}
+    assert report == {"rows": ROWS, "org02_counts_compared": 312, "locus_stated_rows": manifest["sources"]["locus"]["rows"], "ny_index_state_records": 14, "tribes_notice_entries": 19, "problems": []}
 
 
 @pytest.mark.parametrize("edit, expected", [
@@ -277,3 +277,60 @@ def test_a_changed_index_release_stops_verify_and_other_pins_are_named(published
         verify(store, fetcher=FakeFetcher({nyindex.URL: NY_INDEX + b"x"}))
     monkeypatch.setattr(nyindex, "SHA256", "d" * 64)
     assert check(store, fetcher=False) == [f"the manifest's ny_local_law_index sha256 is '{sha256(NY_INDEX)}'; this code pins {'d' * 64}"]
+
+
+def list_row(rows, number):
+    return next(r for r in rows if r["list_row"] == number)
+
+
+def swap_list_rows(rows):
+    first, second = list_row(rows, 2), list_row(rows, 3)
+    first["list_row"], second["list_row"] = 3, 2
+
+
+TRIBES = "federally_recognized_tribes"
+
+
+@pytest.mark.parametrize("edit, expected", [
+    (lambda rows: rows.append(dict(list_row(rows, 1))), [f"{TRIBES}: list_row is not 1 to 20, once each; repeated: 1 (1)", f"{TRIBES}: earlier entries continued by more than one row: 1 (contiguous_48/Absentee-Shawnee Tribe of Indians of Oklahoma)", f"{TRIBES}: 20 rows; the manifest's source gives rows 19", f"{TRIBES}: 20 rows; the manifest's source gives entries 19"]),
+    (lambda rows: rows.remove(list_row(rows, 19)), [f"{TRIBES}: 18 rows; the manifest's source gives rows 19", f"{TRIBES}: 18 rows; the manifest's source gives entries 19", f"{TRIBES}: entries of the notice not in the table: 1 (19)"]),
+    (lambda rows: rows.remove(list_row(rows, 12)), [f"{TRIBES}: list_row is not 1 to 18, once each", f"{TRIBES}: entries of the notice not in the table: 1 (12)"]),
+    (lambda rows: list_row(rows, 5).update(name="Kiowa"), [f"{TRIBES}: name is not the entry's text before its first parenthesis: 1 (5)", f"{TRIBES}: rows that are not the notice's entry at their list_row: 1 (5)"]),
+    (lambda rows: list_row(rows, 14).update(entry="Native Village of Venetie Tribal Government"), [f"{TRIBES}: rows that are not the notice's entry at their list_row: 1 (14)"]),
+    (lambda rows: list_row(rows, 12).update(list="contiguous_48"), [f"{TRIBES}: the lists are not in the notice's order, contiguous_48 then alaska", f"{TRIBES}: rows that are not the notice's entry at their list_row: 1 (12)"]),
+    (lambda rows: list_row(rows, 2).update(list="hawaii"), [f"{TRIBES}: list values ['hawaii'] are not among ['contiguous_48', 'alaska']"]),
+    (lambda rows: list_row(rows, 13).update(previous_entry=None), [f"{TRIBES}: 2 rows continue no earlier entry; the stated count went from 16 to 17", f"{TRIBES}: 17 rows continue an earlier entry; the manifest's source gives the earlier notice 18 entries", f"{TRIBES}: rows that are not the notice's entry at their list_row: 1 (13)"]),
+    (lambda rows: list_row(rows, 13).update(previous_entry="Native Village of Atqasuk"), [f"{TRIBES}: earlier entries continued by more than one row: 1 (alaska/Native Village of Atqasuk)", f"{TRIBES}: rows that are not the notice's entry at their list_row: 1 (13)"]),
+    (swap_list_rows, [f"{TRIBES}: rows that are not the notice's entry at their list_row: 2 (2, 3)"]),
+])
+def test_each_planted_tribes_defect_is_named_even_in_a_consistent_manifest(published, edit, expected):
+    store, _ = published
+    edit_table(store, TRIBES, edit)
+    reseal(store)
+    problems = check(store)
+    assert all(any(problem.startswith(start) for problem in problems) for start in expected), problems
+
+
+@pytest.mark.parametrize("field, value, expected", [
+    ("stated", 18, [f"{TRIBES}: 1 rows continue no earlier entry; the stated count went from 16 to 18", f"{TRIBES}: the manifest's source differs from the notices in ['stated']"]),
+    ("previous_entries", 17, [f"{TRIBES}: 18 rows continue an earlier entry; the manifest's source gives the earlier notice 17 entries", f"{TRIBES}: the manifest's source differs from the notices in ['previous_entries']"]),
+    ("entries", 18, [f"{TRIBES}: 19 rows; the manifest's source gives entries 18", f"{TRIBES}: the manifest's source differs from the notices in ['entries']"]),
+    ("previous_stated", None, [f"{TRIBES}: the manifest's source gives counts ", f"{TRIBES}: the manifest's source differs from the notices in ['previous_stated']", "the card cannot be rendered from the manifest: TypeError"]),
+])
+def test_manifest_counts_that_are_not_the_notices_are_named(published, field, value, expected):
+    store, _ = published
+    edit_manifest(store, lambda manifest: manifest["sources"][TRIBES].update({field: value}))
+    if value is not None:
+        (store.root / CARD).write_text(render(json.loads(store.read_text(MANIFEST))))
+    problems = check(store)
+    assert all(any(problem.startswith(start) for problem in problems) for start in expected), problems
+
+
+def test_a_changed_notice_stops_verify_and_other_pins_are_named(published, monkeypatch):
+    store, _ = published
+    for url, data in ((tribes.NOTICE["url"], TRIBES_NOTICE), (tribes.PREVIOUS["url"], TRIBES_PREVIOUS)):
+        with pytest.raises(SourceChanged, match="not the pinned"):
+            verify(store, fetcher=FakeFetcher({url: data + b"x"}))
+    monkeypatch.setitem(tribes.NOTICE, "sha256", "d" * 64)
+    monkeypatch.setitem(tribes.PREVIOUS, "sha256", "c" * 64)
+    assert check(store, fetcher=False) == [f"the manifest's {TRIBES} sha256 is '{sha256(TRIBES_NOTICE)}'; this code pins {'d' * 64}", f"the manifest's {TRIBES} previous_sha256 is '{sha256(TRIBES_PREVIOUS)}'; this code pins {'c' * 64}"]

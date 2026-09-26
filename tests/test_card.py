@@ -6,7 +6,7 @@ import re
 
 import yaml
 
-from local_laws import locus, precision
+from local_laws import locus, precision, tribes
 from local_laws.build import manifest_text
 from local_laws.card import NY_OUTSIDE, render
 from local_laws.schema import TABLES
@@ -33,6 +33,7 @@ def test_front_matter_declares_each_config_and_the_license(published):
         {"config_name": "locus_crosswalk", "data_files": [{"split": "train", "path": "data/locus_crosswalk.parquet"}]},
         {"config_name": "ny_local_laws", "data_files": [{"split": "train", "path": "data/ny_local_laws.parquet"}]},
         {"config_name": "ny_local_law_index", "data_files": [{"split": "train", "path": "data/ny_local_law_index.parquet"}]},
+        {"config_name": "federally_recognized_tribes", "data_files": [{"split": "train", "path": "data/federally_recognized_tribes.parquet"}]},
     ]
 
 
@@ -242,3 +243,57 @@ def test_repeated_filings_are_counted_with_the_years_that_hold_most_of_them(publ
     assert "3 in all, all in 2025 (2 of its" in card and "as another row, all of them filed in 2025 and 2003;" in card
     card = repeats(manifest, {"2026": 1})
     assert "1 in all, all in 2026 (1 of its" in card and "- 1 row of `ny_local_laws` has the same type, name, law number and filing date as another row, filed in 2026;" in card
+
+
+def test_the_tribes_section_states_the_fixture_s_numbers(published):
+    card = render(published[1])
+    assert "`federally_recognized_tribes` is the list in its notice of January 30, 2026, [91 FR 4102](https://www.federalregister.gov/documents/2026/01/30/2026-01899/" in card
+    assert "one row per entry, 19 in all, 8 in its list for the contiguous 48 states and 11 in its list for Alaska, in the notice's order." in card
+    assert "The notice's summary says it publishes \"the current list of 17 Tribal entities\", 2 fewer than the 19 entries its lists hold, and the notice it updates stated 16 for 18 entries. Neither says why. Some entries send the reader to another with \"See\": Arctic Village and Village of Venetie to Native Village of Venetie Tribal Government; Aleut Community of St. Paul Island and St. George Island to Pribilof Islands Aleut Communities of St. Paul & St. George Islands. The stated count is the entries less the 2 that others send the reader to, but the notice does not say that is how the Bureau counts, so every entry is a row." in card
+    assert "of December 11, 2024 ([89 FR 99899](https://www.federalregister.gov/documents/2024/12/11/2024-29005/" in card and "which had 18 entries: each of them must be continued by exactly one row," in card
+    assert "14 entries are the same, 4 of them only when spaces and capitals are ignored, 1 of those in the name before any parenthesis; 4 changed, 3 of them in the name before any parenthesis; and 1 is new: Lumbee Tribe of North Carolina. `previous_entry` holds each row's earlier entry. " + tribes.NOTICE_SAYS in card
+    assert "\n\nNames that differ from the earlier notice's only in spaces or capitals, kept as each notice types them: Wrangell Cooperative Association, which the earlier notice typed Wrangell Coopera tive Association.\n\n" in card
+    assert "Changed since the earlier notice: Aleut Community of St. Paul Island, Kiowa Tribe, Match-E-Be-Nash-She-Wish Band of Pottawatomi, Native Village of Chenega." in card
+    assert "Beside them, `federally_recognized_tribes` lists the 19 entries of the Bureau of Indian Affairs' list of federally recognized Tribes," in card
+    assert "- `data/federally_recognized_tribes.parquet`: one row per entry of the Bureau of Indian Affairs' list of federally recognized Tribes, 19 rows, sorted by `list_row`." in card
+    assert "- `federally_recognized_tribes` is the Bureau's list as its notice of January 30, 2026 gives it, the latest the Federal Register's API found on September 26, 2026: a Tribe recognized, or an entry corrected, since then is not reflected." in card
+    assert "| SHA-256 `7299b636401302136bc58d8e5fb3f2c494ca1aa702fa1e16240271f94d96ea19` of its XML | `federally_recognized_tribes`: 19 rows |" in card
+    assert "| SHA-256 `fc9ee378384cc4834bbba42c0a888839e47ca127e9855616fca5fb4b40c82da2` of its XML | Checking `federally_recognized_tribes`: its 18 entries, each continued by one row |" in card
+    assert "each signed by its Assistant Secretary—Indian Affairs. They are works of the United States Government, and \"Copyright protection under this title is not available for any work of the United States Government\" ([17 U.S.C. § 105](https://www.copyright.gov/title17/92chap1.html#105)). Cite the list as Bureau of Indian Affairs, \"Indian Entities Recognized by and Eligible To Receive Services From the United States Bureau of Indian Affairs\", 91 FR 4102 (January 30, 2026)." in card
+
+
+def tribes_card(manifest, source=None, **stats):
+    manifest = copy.deepcopy(manifest)
+    manifest["stats"]["tribes"].update(stats)
+    manifest["sources"]["federally_recognized_tribes"].update(source or {})
+    return render(manifest)
+
+
+def test_the_stated_count_sentences_follow_the_counts(published):
+    manifest = published[1]
+    card = tribes_card(manifest, {"stated": 19})
+    assert "\"the current list of 19 Tribal entities\", as many as its lists hold." in card and "Neither says why" not in card and "send the reader" not in card
+    card = tribes_card(manifest, {"stated": 20})
+    assert "\"the current list of 20 Tribal entities\", 1 more than the 19 entries its lists hold," in card and "Some entries send the reader to another" in card and "The stated count is the entries less" not in card
+    card = tribes_card(manifest, referred={})
+    assert "2 fewer than the 19 entries its lists hold, and the notice it updates stated 16 for 18 entries. Neither says why.\n" in card
+    card = tribes_card(manifest, referred={"Native Village of Venetie Tribal Government": ["Arctic Village", "Village of Venetie"]})
+    assert "Some entries send the reader to another with \"See\": Arctic Village and Village of Venetie to Native Village of Venetie Tribal Government.\n" in card
+
+
+def test_the_comparison_sentence_reads_for_no_new_entry_and_no_new_name(published):
+    card = tribes_card(published[1], added=[], renamed=0, respaced=0, respaced_names=[])
+    assert "14 entries are the same; 4 changed, none of them in the name before any parenthesis; and none is new. `previous_entry`" in card and "only in spaces or capitals" not in card
+    card = tribes_card(published[1], added=["Lumbee Tribe of North Carolina", "Tribe X"])
+    assert "; and 2 are new: Lumbee Tribe of North Carolina, Tribe X." in card
+    card = tribes_card(published[1], respaced_names=[["A B", "AB"], ["C", "c"]])
+    assert "4 of them only when spaces and capitals are ignored, 2 of those in the name before any parenthesis; 4 changed" in card
+    assert "kept as each notice types them: A B, which the earlier notice typed AB; C, which the earlier notice typed c.\n" in card
+    card = tribes_card(published[1], respaced=2, respaced_names=[])
+    assert "14 entries are the same, 2 of them only when spaces and capitals are ignored, none of those in the name before any parenthesis; 4 changed" in card and "only in spaces or capitals, kept" not in card
+
+
+def test_what_the_notice_says_is_quoted_only_for_the_notice_it_was_read_from(published):
+    card = tribes_card(published[1], {"document_number": "2027-00001"})
+    assert tribes.NOTICE_SAYS not in card and "Lumbee Tribe of North Carolina. `previous_entry` holds each row's earlier entry.\n" in card
+    assert "- `federally_recognized_tribes` is the Bureau's list as its notice of January 30, 2026 gives it: a Tribe recognized" in card and "the latest the Federal Register's API found" not in card

@@ -111,9 +111,9 @@ MUTATIONS = [
     ("nylaws.py", "NY repeats: names compared as written", "return kind, \" \".join((name or \"\").upper().split()), number, filed", "return kind, name, number, filed"),
     ("nylaws.py", "NY repeats: rows without a number counted", " for row in table if row[\"law_number\"] is not None).items():", ").items():"),
     ("verify.py", "index: index_row not checked", "    if sorted(positions) != list(range(1, len(rows) + 1)):\n", "    if False:\n"),
-    ("verify.py", "index: rows not compared with the source", "        if len(rows) != source.get(field):\n", "        if False:\n"),
-    ("verify.py", "index: rows not compared with the export", "    if changed:\n", "    if False:\n"),
-    ("verify.py", "index: missing export lines pass", "    if missing:\n", "    if False:\n"),
+    ("verify.py", "index: rows not compared with the source", "    for field in (\"rows\", \"state_records\"):\n        if len(rows) != source.get(field):\n", "    for field in (\"rows\", \"state_records\"):\n        if False:\n"),
+    ("verify.py", "index: rows not compared with the export", "    if changed:\n        problems.append(f\"ny_local_law_index: rows that", "    if False:\n        problems.append(f\"ny_local_law_index: rows that"),
+    ("verify.py", "index: missing export lines pass", "    if missing:\n        problems.append(f\"ny_local_law_index: export lines", "    if False:\n        problems.append(f\"ny_local_law_index: export lines"),
     ("verify.py", "index: State records not compared", "    if published != held:\n", "    if False:\n"),
     ("verify.py", "index: type read as written", "check_matches(\"ny_local_law_index\", rows, \"index_row\", governments, problems, nyindex.read_type)", "check_matches(\"ny_local_law_index\", rows, \"index_row\", governments, problems)"),
     ("verify.py", "NY matches not recomputed", "    if rematched:\n", "    if False:\n"),
@@ -124,10 +124,55 @@ MUTATIONS = [
     ("card.py", "NY check: form titles sentence dropped", "    lines.append(form_titles(parts))\n", ""),
     ("card.py", "NY check: unnamed count typed in", "was found in {found:,} of the {asked:,} filings checked, likely", "was found in 7 of the {asked:,} filings checked, likely"),
     ("card.py", "NY check: no-hit form titles branch never taken", "    if not found:\n        return f\"The matched name", "    if False:\n        return f\"The matched name"),
+    ("tribes.py", "tribes: not-XML guard off", "raise SourceChanged(f\"the notice is not XML: {error}\") from None", "raise"),
+    ("tribes.py", "tribes: stated-count guard off", "    if not found:\n        raise SourceChanged(\"the notice's summary", "    if False:\n        raise SourceChanged(\"the notice's summary"),
+    ("tribes.py", "tribes: list headings unchecked", "    if headings != list(LISTS):\n", "    if False:\n"),
+    ("tribes.py", "tribes: blank entries allowed", "    if blank:\n", "    if False:\n"),
+    ("tribes.py", "tribes: whitespace kept", "return \" \".join(\"\".join(element.itertext()).split())", "return \"\".join(element.itertext()).strip()"),
+    ("tribes.py", "tribes: updated notice unchecked", "    if notice[\"updates\"] != PREVIOUS[\"citation\"]:\n", "    if False:\n"),
+    ("tribes.py", "tribes: notice SHA-256 unchecked", "    check_sha256(data, notice[\"sha256\"], notice[\"url\"])\n", ""),
+    ("tribes.py", "tribes: rules reversed", "        for rule in RULES:\n", "        for rule in reversed(RULES):\n"),
+    ("tribes.py", "tribes: rules merged", "            found = [value for value in pool if rule(entry, value)]\n", "            found = [value for value in pool if any(each(entry, value) for each in RULES)]\n"),
+    ("tribes.py", "tribes: former name cut at first parenthesis", "            if depth == 0:\n", "            if entry[position] == \")\":\n"),
+    ("tribes.py", "tribes: spaced parenthesis not closed up", "    entry = re.sub(r\"\\(\\s+\", \"(\", entry)\n", ""),
+    ("tribes.py", "tribes: earlier entries of both lists", "        pool = [value for kind, value in earlier if kind == listed]\n", "        pool = [value for kind, value in earlier]\n"),
+    ("tribes.py", "tribes: ambiguous continuation allowed", "            if len(found) > 1:\n", "            if False:\n"),
+    ("tribes.py", "tribes: dropped or doubled unchecked", "    if dropped or doubled:\n", "    if False:\n"),
+    ("tribes.py", "tribes: doubled not counted", "    doubled = [value for (_, value), n in used.items() if n > 1]\n", "    doubled = []\n"),
+    ("tribes.py", "tribes: added count unchecked", "    if len(added) != stated - earlier_stated:\n", "    if False:\n"),
+    ("tribes.py", "tribes: every change a rename", "if key(name(row[\"previous_entry\"])) != key(row[\"name\"])", "if True"),
+    ("tribes.py", "tribes: unlisted See targets counted", "            if key(target) in names:\n", "            if True:\n"),
+    ("verify.py", "tribes: list_row positions unchecked", "    if set(positions) != set(range(1, len(rows) + 1)):\n", "    if False:\n"),
+    ("verify.py", "tribes: unknown list values allowed", "    if unknown:\n        problems.append(f\"{name}: list values", "    if False:\n        problems.append(f\"{name}: list values"),
+    ("verify.py", "tribes: list order unchecked", "        if places != sorted(places):\n", "        if False:\n"),
+    ("verify.py", "tribes: names unchecked", "    misnamed = [row[\"list_row\"] for row in rows if row[\"name\"] != tribes.name(row[\"entry\"] or \"\")]\n", "    misnamed = []\n"),
+    ("verify.py", "tribes: doubled continuation allowed", "    if doubled:\n        problems.append(f\"{name}: earlier entries continued", "    if False:\n        problems.append(f\"{name}: earlier entries continued"),
+    ("verify.py", "tribes: row counts unchecked", "    for field in (\"rows\", \"entries\"):\n        if len(rows) != source.get(field):\n", "    for field in (\"rows\", \"entries\"):\n        if False:\n"),
+    ("verify.py", "tribes: counts need not be integers", "    if not all(isinstance(value, int) for value in counts.values()):\n", "    if False:\n"),
+    ("verify.py", "tribes: added count unchecked", "    if added != counts[\"stated\"] - counts[\"previous_stated\"]:\n", "    if False:\n"),
+    ("verify.py", "tribes: continuing count unchecked", "    if len(rows) - added != counts[\"previous_entries\"]:\n", "    if False:\n"),
+    ("verify.py", "tribes: rows not compared with notice", "    if changed:\n        problems.append(f\"federally_recognized_tribes: rows that", "    if False:\n        problems.append(f\"federally_recognized_tribes: rows that"),
+    ("verify.py", "tribes: missing entries unchecked", "    if missing:\n        problems.append(f\"federally_recognized_tribes: entries", "    if False:\n        problems.append(f\"federally_recognized_tribes: entries"),
+    ("verify.py", "tribes: counts not compared with notices", "    if differing:\n        problems.append(f\"federally_recognized_tribes: the manifest", "    if False:\n        problems.append(f\"federally_recognized_tribes: the manifest"),
+    ("verify.py", "tribes: notice pin unchecked", "(\"federally_recognized_tribes\", \"sha256\"): tribes.NOTICE[\"sha256\"], ", ""),
+    ("verify.py", "tribes: rows never checked", "check_tribes(recognized, sources.get(\"federally_recognized_tribes\") or {}, problems)", "None"),
+    ("card.py", "tribes: equal-count branch never taken", "    if rows == stated:\n", "    if False:\n"),
+    ("card.py", "tribes: fewer and more not told apart", "'fewer' if gap > 0 else 'more'", "'fewer'"),
+    ("card.py", "tribes: 'less the referred' always said", "        if rows - len(referred) == stated:\n", "        if True:\n"),
+    ("card.py", "tribes: notice quoted for any notice", "says = f\" {tribes.NOTICE_SAYS}\" if source[\"document_number\"] == tribes.NOTICE[\"document_number\"] else \"\"", "says = f\" {tribes.NOTICE_SAYS}\""),
+    ("card.py", "tribes: latest check claimed for any notice", "latest = f\", the latest the Federal Register's API found on {day(tribes.LATEST_CHECKED)}\" if source[\"document_number\"] == tribes.NOTICE[\"document_number\"] else \"\"", "latest = f\", the latest the Federal Register's API found on {day(tribes.LATEST_CHECKED)}\""),
+    ("card.py", "tribes: gap bullet dropped", "        tribes_gap(manifest[\"sources\"][\"federally_recognized_tribes\"]),\n", ""),
+    ("tribes.py", "tribes: respaced entries not counted", "sum(1 for row in same if row[\"entry\"] != row[\"previous_entry\"])", "0"),
+    ("tribes.py", "tribes: respaced names not listed", "sorted([row[\"name\"], name(row[\"previous_entry\"])] for row in same if row[\"name\"] != name(row[\"previous_entry\"]))", "[]"),
+    ("card.py", "tribes: respaced sentence dropped", "        *respaced(respaced_names),\n", ""),
+    ("card.py", "tribes: respaced names not counted", "{f'{len(respaced_names):,}' if respaced_names else 'none'} of those", "none of those"),
 ]
 
 
 def main():
+    stale = [f"{module}: {label}" for module, label, old, _ in MUTATIONS if (REPO / "local_laws" / module).read_text().count(old) != 1]
+    if stale:
+        raise SystemExit(f"the code behind these mutations has changed or repeats; update them: {stale}")
     missed = []
     with tempfile.TemporaryDirectory(prefix="local-laws-mutate-") as scratch:
         copy = Path(scratch).resolve()
@@ -137,10 +182,7 @@ def main():
             shutil.rmtree(copy / "local_laws", ignore_errors=True)
             shutil.copytree(REPO / "local_laws", copy / "local_laws", ignore=IGNORE)
             path = copy / "local_laws" / module
-            code = path.read_text()
-            if code.count(old) != 1:
-                raise SystemExit(f"{module}: the code behind '{label}' has changed; update its mutation")
-            path.write_text(code.replace(old, new))
+            path.write_text(path.read_text().replace(old, new))
             result = subprocess.run([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-q", "-x", "--rootdir", str(copy), str(copy / "tests")], capture_output=True, text=True, env=env, cwd=copy)
             failed = next((line for line in result.stdout.splitlines() if line.startswith(("FAILED", "ERROR"))), "")
             print(f"exit {result.returncode}  {module:10} {label:46} {failed[:100]}", flush=True)
