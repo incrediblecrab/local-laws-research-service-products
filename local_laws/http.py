@@ -7,7 +7,7 @@ import httpx
 
 from . import GITHUB, __version__
 
-USER_AGENT = f"local-laws-research-service-products/{__version__} (+{GITHUB})"
+USER_AGENT = f"us-local-laws/{__version__} (+{GITHUB})"
 INTERVAL = 1.0
 # Hosts whose robots.txt asks for a longer wait between requests than INTERVAL: www.fema.gov gives "Crawl-delay: 15" for every user agent.
 HOST_INTERVALS = {"www.fema.gov": 15.0}

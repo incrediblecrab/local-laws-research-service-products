@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "local-laws-research-service-products"
+name = "us-local-laws"
 dynamic = ["version"]
 description = "Builds a Hugging Face dataset of every US local government in the 2022 Census of Governments, with a crosswalk to the ordinance text in LOCUS and New York's local-law filings."
 readme = "README.md"

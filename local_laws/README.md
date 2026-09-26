@@ -1,6 +1,6 @@
 # local_laws
 
-The pipeline: `python -m local_laws {run,verify,card,harvest-ny,harvest-nfip}`, against the Hub (`--repo`, default `incrediblecrab/local-laws-research-service-products`) or a directory (`--local DIR`).
+The pipeline: `python -m local_laws {run,verify,card,harvest-ny,harvest-nfip}`, against the Hub (`--repo`, default `incrediblecrab/us-local-laws`) or a directory (`--local DIR`).
 
 **Objective:** build the six tables from pinned sources and checked New York and FEMA snapshots, stop rather than publish when a source has changed, commit the tables, manifest and card together, and check what is published.
 
