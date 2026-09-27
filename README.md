@@ -8,12 +8,13 @@ Builds [incrediblecrab/us-local-laws](https://huggingface.co/datasets/incredible
 
 **Files:**
 
+- [`.github/workflows/`](.github/workflows/README.md): the scheduled GitHub Actions workflow
 - [`local_laws/`](local_laws/README.md): the pipeline package
 - [`tests/`](tests/README.md): offline tests
 - [`checks/`](checks/README.md): one-off checks run by hand against a build, whose results the card states
 - [`pyproject.toml`](pyproject.toml): pinned dependencies
 
-**Try it:** `pip install .`, then `python -m local_laws harvest-ny --out /tmp/ny.json.gz`, `python -m local_laws harvest-nfip --out /tmp/nfip.zip`, `python -m local_laws run --local /tmp/out --ny-snapshot /tmp/ny.json.gz --nfip-snapshot /tmp/nfip.zip` and `python -m local_laws verify --local /tmp/out`. Without `--local`, `run` publishes, from a clean commit, with a write token in `HF_TOKEN`. [Running a build](#running-a-build) gives what each step downloads.
+**Try it:** `pip install .`, then `mkdir -p scratch`, `python -m local_laws harvest-ny --out scratch/ny.json.gz`, `python -m local_laws harvest-nfip --out scratch/nfip.zip`, `python -m local_laws run --local scratch/out --workdir scratch/work --ny-snapshot scratch/ny.json.gz --nfip-snapshot scratch/nfip.zip` and `python -m local_laws verify --local scratch/out`. Without `--local`, `run` publishes from a clean commit; locally it may use `HF_TOKEN`, while GitHub Actions uses Hugging Face Trusted Publishing with no stored token. [Running a build](#running-a-build) gives what each step downloads.
 
 ## What it contains
 
@@ -32,7 +33,7 @@ The Census files, LOCUS, the index release and the two notices are pinned by SHA
 
 ## Running a build
 
-The New York harvest makes about 1,500 requests to New York's API, one a second; the FEMA harvest makes 2 to fema.gov, 15 seconds apart, for 3.1 MB of report and 0.96 MB of OpenFEMA parquet; `run` without `--ny-snapshot` or `--nfip-snapshot` makes them itself. A run downloads 1.77 GB of LOCUS parquet to a temporary directory it then deletes, the 10 MB index release from Zenodo and the Bureau's two notices, about 100 KB, from the Federal Register; `verify` downloads the index release, the notices, CG2200ORG02 and FEMA's report again, to compare; it compares the report row for row only while fema.gov still serves the file the build read, since FEMA regenerates it. It runs by hand, never on a schedule: the Census files, LOCUS, the index and the notices are fixed releases, a person reviews a new release before its pin changes, and a new New York or FEMA reading is a new snapshot a person builds from.
+GitHub Actions runs at 00:00 and 12:00 UTC. Each scheduled run first probes with about 38 New York count requests and 2 FEMA downloads; if those match the published manifest and the card render still matches, it skips the full build. When a build is needed, the New York harvest makes about 1,500 requests to New York's API, one a second; the FEMA harvest makes 2 to fema.gov, 15 seconds apart, for 3.1 MB of report and 0.96 MB of OpenFEMA parquet; `run` without `--ny-snapshot` or `--nfip-snapshot` makes them itself. A run downloads 1.77 GB of LOCUS parquet to a work directory it then deletes, the 10 MB index release from Zenodo and the Bureau's two notices, about 100 KB, from the Federal Register; `verify` downloads the index release, the notices, CG2200ORG02 and FEMA's report again, to compare; it compares the report row for row only while fema.gov still serves the file the build read, since FEMA regenerates it. The Census files, LOCUS, the index and the notices stay pinned until a person reviews a new release; the scheduled pin check fails loudly with an error naming the newer release, after any New York/FEMA update that can still be built from the reviewed pins is published.
 
 ## License
 

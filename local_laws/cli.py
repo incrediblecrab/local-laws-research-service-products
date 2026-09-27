@@ -1,30 +1,52 @@
 """python -m local_laws {run,verify,card,harvest-ny,harvest-nfip}: build the dataset and publish it, check what is published, re-render its card, or read New York's local-law filings or FEMA's Community Status Book into a snapshot to build from."""
 
 import argparse
+import hashlib
 import json
 import logging
+import os
 import shutil
 import sys
 import tempfile
 from pathlib import Path
 
-from . import REPO_ID, locus, nfip, nylaws
+from . import REPO_ID, locus, nfip, nylaws, tribes
 from .build import build, code_version, unchanged
 from .card import render
 from .census import SourceChanged
+from huggingface_hub.errors import HfHubHTTPError
 from .http import Blocked, Fetcher, Unavailable
 from .store import CARD, MANIFEST, HubStore, LocalStore, Superseded
 
-# Exit codes besides 0 (done) and 1 (verify found problems, or a commit was superseded).
+# Exit codes besides 0 (done) and 1 (verify found problems, a commit was superseded or a publisher/pin check failed).
 STOPPED = 2
-
+# What the Hub answers when Trusted Publishing was not registered for this repository and workflow.
+NO_PUBLISHER = "No trusted publisher configured"
 
 def open_store(args, write=False):
-    """Reads are anonymous (token=False): the dataset is public. A write uses the token huggingface_hub finds, such as HF_TOKEN, and creates the repo if it does not exist."""
+    """Reads are anonymous (token=False): the dataset is public. A write uses the token huggingface_hub finds, such as HF_TOKEN or Trusted Publishing, and creates the repo if it does not exist."""
     if args.local:
         return LocalStore(args.local)
+    if write and os.environ.get("GITHUB_ACTIONS") == "true":
+        os.environ.setdefault("HF_OIDC_RESOURCE", f"datasets/{args.repo}")
     return HubStore(args.repo, token=None if write else False, create=write)
 
+def github_output(**values):
+    path = os.environ.get("GITHUB_OUTPUT")
+    if path:
+        with open(path, "a") as handle:
+            for key, value in values.items():
+                handle.write(f"{key}={value}\n")
+
+def warn(message, level="warning"):
+    print(f"::{level}::{message}" if os.environ.get("GITHUB_ACTIONS") == "true" else f"{level}: {message}")
+
+def trusted_publisher_error(error, repo):
+    if NO_PUBLISHER not in str(error):
+        return False
+    warn(f"{NO_PUBLISHER} for {repo}, so nothing was written. Register repository incrediblecrab/us-local-laws, branch main and workflow pipeline.yml under the dataset's Settings > Trusted Publishers.", level="error")
+    github_output(commits=0)
+    return True
 
 def publishable(args):
     """The code version to record, or None when writing to the Hub from code that is not committed: a published build names the commit that made it."""
@@ -34,12 +56,16 @@ def publishable(args):
         return None
     return code
 
-
 def cmd_run(args):
     code = publishable(args)
     if code is None:
         return STOPPED
-    store = open_store(args, write=True)
+    try:
+        store = open_store(args, write=True)
+    except HfHubHTTPError as error:
+        if trusted_publisher_error(error, args.repo):
+            return 1
+        raise
     workdir = Path(args.workdir) if args.workdir else Path(tempfile.mkdtemp(prefix="local-laws-"))
     workdir.mkdir(parents=True, exist_ok=True)
     fetcher = Fetcher()
@@ -54,12 +80,19 @@ def cmd_run(args):
                    "tribes": stats["tribes"]["rows"], "nfip_communities": stats["nfip"]["rows"], "requests": fetcher.requests}
         if unchanged(store, manifest):
             print(json.dumps(dict(summary, commit=None, unchanged=True), indent=1))
+            github_output(commits=0)
             return 0
         read = manifest["sources"]["ny_local_laws"]["finished_at"][:10]
         flood_read = manifest["sources"]["nfip_communities"]["retrieved_at"][:10]
         message = f"Build from the 2022 Census of Governments, LOCUS-v1 {locus.REVISION[:12]}, New York's local laws as of {read} and FEMA's Community Status Book as of {flood_read}" + (f" (pipeline {code['commit'][:12]})" if code["commit"] else "")
-        oid = store.commit({repo_path: str(local) for repo_path, local in files.items()}, message)
+        try:
+            oid = store.commit({repo_path: str(local) for repo_path, local in files.items()}, message)
+        except HfHubHTTPError as error:
+            if trusted_publisher_error(error, args.repo):
+                return 1
+            raise
         print(json.dumps(dict(summary, commit=oid, unchanged=False), indent=1))
+        github_output(commits=1)
         return 0
     except (SourceChanged, Blocked, Unavailable) as error:
         print(f"stopped, nothing written: {type(error).__name__}: {error}", file=sys.stderr)
@@ -72,6 +105,81 @@ def cmd_run(args):
         if not args.workdir:
             shutil.rmtree(workdir, ignore_errors=True)
 
+def ny_head(fetcher):
+    """Cheap New York state: category total plus the count in each filing year, the same totals harvest reconciles after reading every page."""
+    before = nylaws.total(fetcher, nylaws.category())
+    first = nylaws.first_filed(fetcher, "dateFiled").year
+    last = nylaws.first_filed(fetcher, "-dateFiled").year
+    years = {}
+    for year in range(first, last + 1):
+        years[str(year)] = nylaws.total(fetcher, nylaws.category(nylaws.filed_between(*nylaws.year_span(year))))
+    after = nylaws.total(fetcher, nylaws.category())
+    return {"total": after, "years": years, "stable": before == after == sum(years.values())}
+
+def nfip_head(fetcher):
+    """Cheap FEMA state: hashes of the two files harvest would snapshot, without parsing the whole build."""
+    csv = fetcher.get(nfip.CSV_URL)
+    api = fetcher.get(nfip.API_URL)
+    return {"sha256": hashlib.sha256(csv).hexdigest(), "bytes": len(csv), "api_sha256": hashlib.sha256(api).hexdigest(), "api_bytes": len(api)}
+
+def probe_decision(manifest, card, head):
+    reasons = []
+    if manifest is None:
+        reasons.append("no manifest is published")
+    else:
+        sources = manifest.get("sources", {})
+        ny = sources.get("ny_local_laws", {})
+        if ny.get("total") != head["ny"]["total"] or ny.get("years") != head["ny"]["years"]:
+            reasons.append("New York local-law counts changed")
+        if not head["ny"].get("stable"):
+            reasons.append("New York local-law counts changed while probing")
+        flood = sources.get("nfip_communities", {})
+        api = flood.get("api", {})
+        if flood.get("sha256") != head["nfip"]["sha256"] or api.get("sha256") != head["nfip"]["api_sha256"]:
+            reasons.append("FEMA Community Status Book changed")
+        if card != render(manifest):
+            reasons.append("dataset card render changed")
+    return {"needed": bool(reasons), "reasons": reasons or ["published sources match"]}
+
+def cmd_probe(args):
+    fetcher = Fetcher()
+    try:
+        store = open_store(args)
+        text = store.read_text(MANIFEST)
+        manifest = json.loads(text) if text else None
+        card = store.read_text(CARD) if manifest else None
+        head = {"ny": ny_head(fetcher), "nfip": nfip_head(fetcher)}
+    except (SourceChanged, Blocked, Unavailable) as error:
+        warn(f"probe could not prove the dataset is current: {type(error).__name__}: {error}")
+        github_output(needed="true")
+        return 0
+    finally:
+        fetcher.close()
+    decision = probe_decision(manifest, card, head)
+    print(json.dumps({**decision, "head": head, "requests": fetcher.requests}, indent=1))
+    github_output(needed="true" if decision["needed"] else "false")
+    return 0
+
+def cmd_check_pins(args):
+    fetcher = Fetcher()
+    try:
+        report = {"bia_notices": tribes.latest(fetcher), "locus": locus.latest()}
+    except (SourceChanged, Blocked, Unavailable) as error:
+        warn(f"pin check could not finish: {type(error).__name__}: {error}", level="error")
+        return 1
+    finally:
+        fetcher.close()
+    problems = []
+    latest = report["bia_notices"][:2]
+    pinned = [tribes.NOTICE["document_number"], tribes.PREVIOUS["document_number"]]
+    if [item["document_number"] for item in latest] != pinned:
+        problems.append(f"Federal Register has newer BIA recognized-Tribes notices: latest two are {[item['document_number'] for item in latest]}, pinned are {pinned}; review the new notice and update local_laws/tribes.py pins before adopting it")
+    if report["locus"].get("sha") != locus.REVISION:
+        problems.append(f"LOCUS-v1 latest revision is {report['locus'].get('sha')}, pinned revision is {locus.REVISION}; review the new release before updating local_laws/locus.py")
+    print(json.dumps(report, indent=1))
+    for problem in problems:
+        warn(problem, level="error")
+    return 1 if problems else 0
 
 def cmd_verify(args):
     from .verify import verify
@@ -89,12 +197,16 @@ def cmd_verify(args):
     print(json.dumps(report, indent=1))
     return 1 if report["problems"] else 0
 
-
 def cmd_card(args):
     """Re-renders the card from the published manifest, for a card change that needs no rebuild."""
     if publishable(args) is None:
         return STOPPED
-    store = open_store(args, write=True)
+    try:
+        store = open_store(args, write=True)
+    except HfHubHTTPError as error:
+        if trusted_publisher_error(error, args.repo):
+            return 1
+        raise
     text = store.read_text(MANIFEST)
     if text is None:
         print(f"no {MANIFEST}: run `python -m local_laws run` first", file=sys.stderr)
@@ -108,12 +220,15 @@ def cmd_card(args):
         path.write_text(card)
         try:
             store.commit({CARD: str(path)}, "Update dataset card")
+        except HfHubHTTPError as error:
+            if trusted_publisher_error(error, args.repo):
+                return 1
+            raise
         except Superseded as error:
             print(f"not written: {error}", file=sys.stderr)
             return 1
     print("card updated")
     return 0
-
 
 def cmd_harvest_ny(args):
     """Reads New York's local-law category into a snapshot file that `run --ny-snapshot` builds from, so a build can be repeated without reading the API again."""
@@ -128,7 +243,6 @@ def cmd_harvest_ny(args):
     nylaws.save(snapshot, args.out)
     print(json.dumps({"out": args.out, "total": snapshot["total"], "years": snapshot["years"], "started_at": snapshot["started_at"], "finished_at": snapshot["finished_at"], "requests": fetcher.requests}, indent=1))
     return 0
-
 
 def cmd_harvest_nfip(args):
     """Reads FEMA's Community Status Book and the OpenFEMA file it is checked against into a snapshot that `run --nfip-snapshot` builds from; checks that the two can be read and reconciled before writing it."""
@@ -146,7 +260,6 @@ def cmd_harvest_nfip(args):
     print(json.dumps({"out": args.out, "rows": len(table), "api_rows": reconciled["rows"], "only_in_api": reconciled["only_in_api"], "retrieved_at": snapshot["retrieved_at"], "api_retrieved_at": snapshot["api_retrieved_at"], "requests": fetcher.requests}, indent=1))
     return 0
 
-
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="local_laws", description=__doc__, allow_abbrev=False)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -159,6 +272,8 @@ def main(argv=None):
         sub.set_defaults(handler=handler)
         return sub
 
+    add("probe", cmd_probe, "cheaply decide whether New York, FEMA or the dataset card changed")
+    add("check-pins", cmd_check_pins, "fail if a manually pinned source has a newer release to review")
     run = add("run", cmd_run, "download the sources, check them, build the tables and commit them with the manifest and card")
     run.add_argument("--workdir", help="keep scratch files here (default: a temporary directory, deleted afterwards); LOCUS's download needs about 2 GB")
     run.add_argument("--ny-snapshot", help="build New York's table from a snapshot harvest-ny wrote, instead of reading the API again (about 1,500 requests)")

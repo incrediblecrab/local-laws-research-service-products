@@ -99,6 +99,15 @@ REVIEW_FINDING = ("25 towns and villages whose code says City of (11 of them in 
                   "Skagway, whose code says Municipality, and 2 codes that name their county more often than themselves (Lexington, South Carolina, and Franklin, Nebraska)")
 
 
+def latest():
+    """The Hub's current HEAD for LOCUS-v1, for the scheduled stale-pin check. The build still reads REVISION until a person reviews a newer release."""
+    from huggingface_hub import HfApi
+
+    info = HfApi(token=False).dataset_info(REPO_ID)
+    modified = getattr(info, "last_modified", None)
+    return {"repo_id": REPO_ID, "sha": info.sha, "last_modified": modified.isoformat() if modified else None, "pinned": REVISION}
+
+
 def stated_rows(api=None):
     """The row count LOCUS's card states at REVISION. Raises SourceChanged if the card's license is not the one the dataset card was written for."""
     from huggingface_hub import HfApi

@@ -146,3 +146,24 @@ def test_what_the_card_quotes_from_the_notice_is_in_the_notice():
     quotes = re.findall(r'"([^"]+)"', tribes.NOTICE_SAYS)
     assert len(quotes) == 3 and all(quote in text for quote in quotes), [quote for quote in quotes if quote not in text]
     assert "The list is updated from the notice published on December 11, 2024 (89 FR 99899)." in text
+
+
+def test_latest_reads_the_two_latest_matching_federal_register_notices():
+    class Fetcher:
+        def get(self, url):
+            assert tribes.LATEST_API in url
+            return b'{"results":[{"document_number":"2026-17057","publication_date":"2026-08-21","title":"Caddo Nation Liquor Control Code","html_url":"x"},{"document_number":"2026-01899","publication_date":"2026-01-30","title":"Indian Entities Recognized by and Eligible To Receive Services From the United States Bureau of Indian Affairs","html_url":"a"},{"document_number":"2024-29005","publication_date":"2024-12-11","title":"Indian Entities Recognized by and Eligible To Receive Services From the United States Bureau of Indian Affairs","html_url":"b"}]} '
+
+    assert tribes.latest(Fetcher()) == [
+        {"document_number": "2026-01899", "published": "2026-01-30", "title": tribes.TITLE, "html_url": "a"},
+        {"document_number": "2024-29005", "published": "2024-12-11", "title": tribes.TITLE, "html_url": "b"},
+    ]
+
+
+def test_latest_stops_when_the_api_does_not_return_two_matching_notices():
+    class Fetcher:
+        def get(self, url):
+            return b'{"results":[{"document_number":"2026-01899","publication_date":"2026-01-30","title":"Indian Entities Recognized by and Eligible To Receive Services From the United States Bureau of Indian Affairs"}]}'
+
+    with pytest.raises(SourceChanged, match="returned 1 matching recognized-Tribes notices"):
+        tribes.latest(Fetcher())

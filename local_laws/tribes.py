@@ -3,8 +3,10 @@
 The Census of Governments does not count tribal governments. Under the Federally Recognized Indian Tribe List Act of 1994, the Bureau of Indian Affairs publishes the list of Tribal entities it recognizes in the Federal Register. The build reads the latest notice and the one it says it updates, each at a pinned SHA-256, from the Federal Register's XML, and takes one row per entry of the latest notice's two lists. It then checks the list against the earlier one: every earlier entry must be continued by exactly one row, and the rows no earlier entry continues must be as many as the stated count grew by, which also makes the lists hold as many entries more than their stated count as the earlier lists did.
 """
 
+import json
 import re
 from collections import Counter
+from urllib.parse import urlencode
 from xml.etree import ElementTree
 
 from .census import SourceChanged, check_sha256
@@ -30,6 +32,7 @@ PREVIOUS = {
     "sha256": "31f306394463efde155a04c8d7307a9be6a4b35b0d8c0973ab066b72cff950fe",
 }
 TITLE = "Indian Entities Recognized by and Eligible To Receive Services From the United States Bureau of Indian Affairs"
+LATEST_API = "https://www.federalregister.gov/api/v1/documents.json"
 # The `list` value for each of the notice's two lists, and how its heading begins.
 LISTS = {
     "contiguous_48": "Indian Tribal Entities Within the Contiguous 48 States",
@@ -46,6 +49,19 @@ PREVIOUSLY = "(previously listed as "
 SEE = re.compile(r"\(\s*See ([^()]*)\)")
 FIELDS = ("list_row", "list", "entry", "name", "previous_entry")
 
+
+
+def latest(fetcher, limit=10):
+    """Recognized-Tribes notices from newest to oldest according to the live Federal Register API; used only to fail a scheduled run when a person must review a new notice before the pins move."""
+    query = urlencode({"conditions[term]": TITLE, "conditions[agencies][]": "indian-affairs-bureau", "order": "newest", "per_page": str(limit)})
+    data = json.loads(fetcher.get(f"{LATEST_API}?{query}"))
+    notices = []
+    for item in data.get("results", []):
+        if item.get("title") == TITLE:
+            notices.append({"document_number": item.get("document_number"), "published": item.get("publication_date"), "title": item.get("title"), "html_url": item.get("html_url")})
+    if len(notices) < 2:
+        raise SourceChanged(f"the Federal Register API returned {len(notices)} matching recognized-Tribes notices, not at least two")
+    return notices
 
 def download(fetcher, notice):
     data = fetcher.get(notice["url"])

@@ -3,6 +3,7 @@
 import copy
 import itertools
 import json
+import os
 
 import pytest
 
@@ -189,3 +190,89 @@ def test_a_rerun_commits_a_card_that_is_not_the_current_render(tmp_path, offline
 def test_card_needs_a_manifest(tmp_path, offline, capsys):
     assert run("card", "--local", str(tmp_path / "empty")) == cli.STOPPED
     assert "no manifest.json" in capsys.readouterr().err
+
+
+def test_probe_skips_a_build_when_new_york_fema_and_the_card_match(published, offline, monkeypatch, capsys):
+    store, _ = published
+    assert run("probe", "--local", str(store.root)) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["needed"] is False
+    assert report["reasons"] == ["published sources match"]
+    assert report["requests"] == 38
+
+
+def test_probe_requests_a_build_when_a_cheap_head_changes(published, offline, monkeypatch, capsys):
+    store, _ = published
+
+    original = cli.ny_head
+
+    def changed(fetcher):
+        head = original(fetcher)
+        head["total"] += 1
+        return head
+
+    monkeypatch.setattr(cli, "ny_head", changed)
+    assert run("probe", "--local", str(store.root)) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["needed"] is True
+    assert "New York local-law counts changed" in report["reasons"]
+
+
+def test_github_actions_writes_set_the_hugging_face_oidc_resource(monkeypatch):
+    seen = {}
+
+    class Args:
+        local = None
+        repo = "owner/data"
+
+    def hub(repo, token=None, create=False):
+        seen.update(repo=repo, token=token, create=create, oidc=os.environ.get("HF_OIDC_RESOURCE"))
+        raise RuntimeError("stop before network")
+
+    monkeypatch.setattr(cli, "HubStore", hub)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.delenv("HF_OIDC_RESOURCE", raising=False)
+    with pytest.raises(RuntimeError):
+        cli.open_store(Args, write=True)
+    assert seen == {"repo": "owner/data", "token": None, "create": True, "oidc": "datasets/owner/data"}
+
+
+def test_reads_do_not_request_an_oidc_token_in_github_actions(monkeypatch):
+    seen = {}
+
+    class Args:
+        local = None
+        repo = "owner/data"
+
+    def hub(repo, token=None, create=False):
+        seen.update(token=token, create=create, oidc=os.environ.get("HF_OIDC_RESOURCE"))
+        raise RuntimeError("stop before network")
+
+    monkeypatch.setattr(cli, "HubStore", hub)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.delenv("HF_OIDC_RESOURCE", raising=False)
+    with pytest.raises(RuntimeError):
+        cli.open_store(Args, write=False)
+    assert seen == {"token": False, "create": False, "oidc": None}
+
+
+def test_check_pins_fails_loudly_when_a_person_must_review_a_new_notice(offline, monkeypatch, capsys):
+    monkeypatch.setattr(tribes, "latest", lambda fetcher: [{"document_number": "2027-00001", "published": "2027-01-30"}, {"document_number": tribes.NOTICE["document_number"], "published": tribes.NOTICE["published"]}])
+    monkeypatch.setattr(locus, "latest", lambda: {"repo_id": locus.REPO_ID, "sha": locus.REVISION, "pinned": locus.REVISION})
+    assert run("check-pins", "--local", "unused") == 1
+    output = capsys.readouterr().out
+    assert "Federal Register has newer BIA recognized-Tribes notices" in output
+    assert "review the new notice" in output
+
+
+def test_check_pins_accepts_the_current_pins(offline, monkeypatch, capsys):
+    monkeypatch.setattr(tribes, "latest", lambda fetcher: [{"document_number": tribes.NOTICE["document_number"], "published": tribes.NOTICE["published"]}, {"document_number": tribes.PREVIOUS["document_number"], "published": tribes.PREVIOUS["published"]}])
+    monkeypatch.setattr(locus, "latest", lambda: {"repo_id": locus.REPO_ID, "sha": locus.REVISION, "pinned": locus.REVISION})
+    assert run("check-pins", "--local", "unused") == 0
+    assert "bia_notices" in capsys.readouterr().out
+
+
+def test_no_trusted_publisher_message_is_a_github_actions_error(monkeypatch, capsys):
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert cli.trusted_publisher_error(RuntimeError("invalid_grant: No trusted publisher configured"), "owner/data") is True
+    assert "::error::No trusted publisher configured for owner/data" in capsys.readouterr().out
