@@ -1,6 +1,7 @@
 """HubStore against a fake Hub that behaves as the real one does where it matters: a commit whose parent is not the head is refused with 412, parquet files are LFS (a SHA-256), text files are git blobs (a SHA-1)."""
 
 import hashlib
+import json
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -161,6 +162,24 @@ def test_write_parquet_is_deterministic_whatever_the_row_order(tmp_path):
     first = write_parquet(rows, tmp_path / "a.parquet", schema, lambda row: row["id"])
     second = write_parquet(list(reversed(rows)), tmp_path / "b.parquet", schema, lambda row: row["id"])
     assert first == second and first["rows"] == 1000
+
+
+def test_a_busy_readme_check_and_a_dropped_connection_are_retried(tmp_path, no_sleep):
+    """huggingface_hub parses the validate-yaml body before it checks the status, so a busy Hub raises JSONDecodeError before anything is uploaded (the Fed scheduled run of September 27, 2026 stopped on one); a timeout can come after the commit landed."""
+    api = FakeApi()
+    api.failures = [(json.JSONDecodeError("Expecting value", "", 0), False), (httpx.ReadTimeout("planted: the response never arrived"), True)]
+    hub = HubStore("x/y", api=api)
+    assert hub.commit(local_files(tmp_path), "build") == "commit-1"
+    assert api.commits == 1 and no_sleep == [60, 120], "retried twice, and the landed commit was adopted rather than made again"
+
+
+def test_invalid_card_metadata_is_raised_at_once(tmp_path):
+    api = FakeApi()
+    api.failures = [(ValueError("Invalid metadata in README.md."), False)]
+    hub = HubStore("x/y", api=api)
+    with pytest.raises(ValueError, match="Invalid metadata"):
+        hub.commit(local_files(tmp_path), "build")
+    assert api.calls.count("create_commit") == 1, "JSONDecodeError is a ValueError, but a card the Hub rejects is not retried"
 
 
 def test_git_blob_sha1_is_git_s():
