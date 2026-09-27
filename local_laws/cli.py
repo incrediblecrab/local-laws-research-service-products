@@ -50,6 +50,43 @@ def trusted_publisher_error(error, repo):
     github_output(commits=0)
     return True
 
+
+def http_status(error):
+    return getattr(getattr(error, "response", None), "status_code", None)
+
+
+def fema_http_error(error):
+    request = getattr(error, "request", None)
+    url = str(getattr(request, "url", ""))
+    return url.startswith(nfip.CSV_URL) or url.startswith(nfip.API_URL)
+
+
+def response_headers(error):
+    headers = getattr(getattr(error, "response", None), "headers", {})
+    keep = ("date", "server", "content-type", "content-length", "cf-mitigated", "x-cache", "via")
+    return {key: headers[key] for key in keep if key in headers}
+
+
+def last_nfip_fetch(store):
+    try:
+        text = store.read_text(MANIFEST)
+    except Exception:  # noqa: BLE001 - this is diagnostic only
+        return None
+    if not text:
+        return None
+    return (json.loads(text).get("sources", {}).get("nfip_communities", {}).get("retrieved_at"))
+
+
+def ci_fema_warning(error, store):
+    if os.environ.get("GITHUB_ACTIONS") != "true" or not isinstance(error, httpx.HTTPStatusError) or not fema_http_error(error):
+        return False
+    request = getattr(error, "request", None)
+    url = str(getattr(request, "url", nfip.CSV_URL))
+    last = last_nfip_fetch(store) or "unknown"
+    warn(f"FEMA Community Status Book refresh from GitHub Actions failed: GET {url} returned HTTP {http_status(error)} with headers {response_headers(error)}. Last successful FEMA fetch in the published manifest: {last}. No commit was written; the next schedule will try again.")
+    github_output(commits=0)
+    return True
+
 def publishable(args):
     """The code version to record, or None when writing to the Hub from code that is not committed: a published build names the commit that made it."""
     code = code_version()
@@ -96,7 +133,9 @@ def cmd_run(args):
         print(json.dumps(dict(summary, commit=oid, unchanged=False), indent=1))
         github_output(commits=1)
         return 0
-    except (SourceChanged, Blocked, Unavailable) as error:
+    except (SourceChanged, Blocked, Unavailable, httpx.HTTPStatusError) as error:
+        if ci_fema_warning(error, store):
+            return 0
         print(f"stopped, nothing written: {type(error).__name__}: {error}", file=sys.stderr)
         return STOPPED
     except Superseded as error:

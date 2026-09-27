@@ -288,3 +288,16 @@ def test_probe_can_skip_fema_when_the_report_host_refuses_the_cheap_read(publish
     report = json.loads(out[out.index("{"):])
     assert report["needed"] is False
     assert report["head"]["nfip"] is None
+
+
+def test_github_actions_fema_403_warns_and_leaves_the_schedule_green(tmp_path, offline, monkeypatch, capsys):
+    request = httpx.Request("GET", nfip.CSV_URL)
+    response = httpx.Response(403, headers={"content-type": "text/html", "server": "Akamai"}, request=request)
+    monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher({nfip.CSV_URL: httpx.HTTPStatusError("forbidden", request=request, response=response)}))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert run("run", "--local", str(tmp_path / "out")) == 0
+    out = capsys.readouterr().out
+    assert "::warning::FEMA Community Status Book refresh from GitHub Actions failed: GET https://www.fema.gov/cis/nation.csv returned HTTP 403" in out
+    assert "'content-type': 'text/html'" in out
+    assert "No commit was written" in out
+    assert not (tmp_path / "out" / MANIFEST).exists()

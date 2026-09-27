@@ -26,7 +26,7 @@ class Fetcher:
     def __init__(self, interval=INTERVAL, max_retries=4, timeout=120.0, transport=None, sleep=time.sleep):
         self.interval = interval
         self.max_retries = max_retries
-        self.client = httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=timeout, follow_redirects=True, transport=transport)
+        self.client = httpx.Client(headers={"User-Agent": USER_AGENT, "Accept": "text/csv, application/parquet, application/octet-stream, */*"}, timeout=timeout, follow_redirects=True, transport=transport)
         self.sleep = sleep
         self._next_at = {}
         self.requests = 0
