@@ -5,6 +5,7 @@ import itertools
 import json
 import os
 
+import httpx
 import pytest
 
 from conftest import CODE, NY_SAMPLE, FakeFetcher, FakeNYApi, fake_locus_download, nfip_snapshot
@@ -276,3 +277,14 @@ def test_no_trusted_publisher_message_is_a_github_actions_error(monkeypatch, cap
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     assert cli.trusted_publisher_error(RuntimeError("invalid_grant: No trusted publisher configured"), "owner/data") is True
     assert "::error::No trusted publisher configured for owner/data" in capsys.readouterr().out
+
+
+def test_probe_can_skip_fema_when_the_report_host_refuses_the_cheap_read(published, offline, monkeypatch, capsys):
+    store, _ = published
+    response = httpx.Response(403, request=httpx.Request("GET", nfip.CSV_URL))
+    monkeypatch.setattr(cli, "nfip_head", lambda fetcher: (_ for _ in ()).throw(httpx.HTTPStatusError("forbidden", request=response.request, response=response)))
+    assert run("probe", "--local", str(store.root)) == 0
+    out = capsys.readouterr().out
+    report = json.loads(out[out.index("{"):])
+    assert report["needed"] is False
+    assert report["head"]["nfip"] is None

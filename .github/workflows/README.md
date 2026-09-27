@@ -6,4 +6,4 @@
 
 **Files:**
 
-- [`pipeline.yml`](pipeline.yml): `probe` compares New York filing-year counts, FEMA file hashes and the published card with cheap reads. When needed, `run` harvests New York and FEMA, builds from pinned sources, writes only if changed, verifies the published commit, then checks pinned sources for newer releases a person must review. `inactivity` fails after 50 days without a commit; it makes no keepalive commit because GitHub treats that as circumventing the 60-day schedule disablement policy.
+- [`pipeline.yml`](pipeline.yml): `probe` compares New York filing-year counts, FEMA file hashes and the published card with cheap reads. When only the card render changed, `card` updates it without a full build; otherwise `run` harvests New York and FEMA, builds from pinned sources, writes only if changed, verifies the published commit, then checks pinned sources for newer releases a person must review. `inactivity` fails after 50 days without a commit; it makes no keepalive commit because GitHub treats that as circumventing the 60-day schedule disablement policy.

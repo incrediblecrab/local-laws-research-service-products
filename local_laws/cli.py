@@ -10,6 +10,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import httpx
+
 from . import REPO_ID, locus, nfip, nylaws, tribes
 from .build import build, code_version, unchanged
 from .card import render
@@ -135,7 +137,9 @@ def probe_decision(manifest, card, head):
             reasons.append("New York local-law counts changed while probing")
         flood = sources.get("nfip_communities", {})
         api = flood.get("api", {})
-        if flood.get("sha256") != head["nfip"]["sha256"] or api.get("sha256") != head["nfip"]["api_sha256"]:
+        if head.get("nfip") is None:
+            pass
+        elif flood.get("sha256") != head["nfip"]["sha256"] or api.get("sha256") != head["nfip"]["api_sha256"]:
             reasons.append("FEMA Community Status Book changed")
         if card != render(manifest):
             reasons.append("dataset card render changed")
@@ -148,16 +152,22 @@ def cmd_probe(args):
         text = store.read_text(MANIFEST)
         manifest = json.loads(text) if text else None
         card = store.read_text(CARD) if manifest else None
-        head = {"ny": ny_head(fetcher), "nfip": nfip_head(fetcher)}
-    except (SourceChanged, Blocked, Unavailable) as error:
+        head = {"ny": ny_head(fetcher)}
+        try:
+            head["nfip"] = nfip_head(fetcher)
+        except (Blocked, Unavailable, httpx.HTTPStatusError, httpx.TransportError) as error:
+            head["nfip"] = None
+            warn(f"FEMA probe skipped: {type(error).__name__}: {error}")
+    except (SourceChanged, Blocked, Unavailable, httpx.HTTPStatusError, httpx.TransportError) as error:
         warn(f"probe could not prove the dataset is current: {type(error).__name__}: {error}")
-        github_output(needed="true")
+        github_output(needed="true", card_only="false")
         return 0
     finally:
         fetcher.close()
     decision = probe_decision(manifest, card, head)
-    print(json.dumps({**decision, "head": head, "requests": fetcher.requests}, indent=1))
-    github_output(needed="true" if decision["needed"] else "false")
+    card_only = decision["reasons"] == ["dataset card render changed"]
+    print(json.dumps({**decision, "card_only": card_only, "head": head, "requests": fetcher.requests}, indent=1))
+    github_output(needed="true" if decision["needed"] else "false", card_only="true" if card_only else "false")
     return 0
 
 def cmd_check_pins(args):

@@ -1,4 +1,4 @@
-# At 00:00 and 12:00 UTC, probe: New York filing counts by year, the two FEMA file hashes, and the dataset card render. When the probe says a sync is needed, the run harvests New York and FEMA, builds all tables from reviewed pins, commits only if the manifest and card changed, and verifies what was published. The pin check runs after any publishable update, so a newer LOCUS or BIA release fails loudly without blocking daily New York/FEMA updates that can still be built from the reviewed pins.
+# At 00:00 and 12:00 UTC, probe: New York filing counts by year, the two FEMA file hashes, and the dataset card render. When the probe says only the card render changed, the workflow commits the card alone; otherwise a needed sync harvests New York and FEMA, builds all tables from reviewed pins, commits only if the manifest and card changed, and verifies what was published. The pin check runs after any publishable update, so a newer LOCUS or BIA release fails loudly without blocking daily New York/FEMA updates that can still be built from the reviewed pins.
 # Writes to Hugging Face use Trusted Publishing: with `id-token: write`, the CLI sets HF_OIDC_RESOURCE from its --repo before creating a writing HfApi, so no Hugging Face token is stored anywhere. The workflow uses no secret.
 name: pipeline
 
@@ -40,9 +40,13 @@ jobs:
         run: |
           set -o pipefail
           python -m local_laws probe | tee probe.json
+      - name: Update card only
+        id: card
+        if: ${{ !inputs.args && steps.probe.outputs.card_only == 'true' }}
+        run: python -m local_laws card
       - name: Sync
         id: sync
-        if: ${{ steps.probe.outputs.needed == 'true' || inputs.args }}
+        if: ${{ (steps.probe.outputs.needed == 'true' && steps.probe.outputs.card_only != 'true') || inputs.args }}
         env:
           EXTRA_ARGS: ${{ inputs.args }}
         run: |
