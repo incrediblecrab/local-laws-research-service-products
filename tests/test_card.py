@@ -38,6 +38,20 @@ def test_front_matter_declares_each_config_and_the_license(published):
     ]
 
 
+def test_the_stored_fema_files_are_described_only_when_the_manifest_lists_them(published):
+    manifest = published[1]
+    card = render(manifest)
+    assert f"- `{nfip.SNAPSHOT}`: the two files the build read from FEMA, the report `nation.csv` and OpenFEMA's `NfipCommunityStatusBook.parquet`, stored uncompressed" in card
+    assert "and commits the tables, the two FEMA files it read, `manifest.json` and this card in one commit." in card
+    assert "and builds `nfip_communities` from them, so New York's filings still update while the FEMA table stays at the report as read on September 26, 2026." in card
+    assert f"`{nfip.SNAPSHOT}` holds the report and OpenFEMA's file as the build read them, unchanged." in card
+    earlier = copy.deepcopy(manifest)
+    del earlier["files"][nfip.SNAPSHOT]
+    card = render(earlier)
+    assert nfip.SNAPSHOT not in card and "and commits the tables, `manifest.json` and this card in one commit." in card
+    assert "a scheduled run that cannot refresh FEMA logs a warning with the HTTP status and headers, writes no commit, and leaves the FEMA table at the last successful report date in this manifest, September 26, 2026." in card
+
+
 def test_every_column_is_documented_with_its_type(published):
     card = render(published[1])
     for spec in TABLES.values():

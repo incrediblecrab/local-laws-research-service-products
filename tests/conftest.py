@@ -130,6 +130,17 @@ def nfip_snapshot():
     return {"csv": NFIP_CSV, "retrieved_at": "2026-09-26T08:18:00Z", "api": NFIP_API, "api_retrieved_at": "2026-09-26T08:23:00Z"}
 
 
+def rezipped(snapshot, **changes):
+    """snapshot's files zipped again, deflated rather than stored as nfip.save stores them, with changes to its reading: the same files in different bytes when there are none."""
+    buffer = io.BytesIO()
+    read = {"csv_url": nfip.CSV_URL, "retrieved_at": snapshot["retrieved_at"], "api_url": nfip.API_URL, "api_retrieved_at": snapshot["api_retrieved_at"]} | changes
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("nation.csv", snapshot["csv"])
+        archive.writestr("NfipCommunityStatusBook.parquet", snapshot["api"])
+        archive.writestr("read.json", json.dumps(read))
+    return buffer.getvalue()
+
+
 def api_item(kept):
     """An API search result carrying what nylaws.keep reads from one, and a signed download link it must leave out."""
     return {

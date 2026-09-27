@@ -10,7 +10,7 @@ from pathlib import Path
 from . import __version__, census, locus, nfip, nyindex, nylaws, schema, tribes
 from .card import render
 from .census import SourceChanged
-from .store import CARD, MANIFEST, write_parquet
+from .store import CARD, MANIFEST, sha256_file, write_parquet
 
 SORT_KEYS = {
     "governments": lambda row: row["census_id"],
@@ -140,6 +140,11 @@ def build(fetcher, workdir, locus_download=None, ny_snapshot=None, nfip_snapshot
         local = stage / spec["file"]
         entries[spec["file"]] = write_parquet(rows, local, spec["schema"], SORT_KEYS[name])
         files[spec["file"]] = local
+    local = stage / nfip.SNAPSHOT
+    local.parent.mkdir(parents=True, exist_ok=True)
+    nfip.save(flood, local)
+    entries[nfip.SNAPSHOT] = {"bytes": local.stat().st_size, "sha256": sha256_file(local)}
+    files[nfip.SNAPSHOT] = local
     manifest = {
         "built_at": built_at or datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "code": code or code_version(),

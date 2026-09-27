@@ -29,6 +29,9 @@ REUSE = "https://www.fema.gov/about/website-information"
 PROGRAM_SAYS = "The National Flood Insurance Program (NFIP) enables property owners to purchase flood insurance. In return, communities agree to adopt and implement local floodplain management regulations that contribute to protecting lives and reducing the risk of new construction and substantial improvements from future flooding."
 CRS_SAYS = "a voluntary incentive program that recognizes and encourages community floodplain management practices that exceed the minimum requirements of the National Flood Insurance Program (NFIP)"
 REUSE_SAYS = "Most material on FEMA.gov is free of copyright and may be copied and distributed without permission."
+# Where each build stores the two files it read from fema.gov, as harvest-nfip saves them, so that a run fema.gov refuses can build the table from them again; see cli.read_fema.
+SNAPSHOT = "sources/nfip_snapshot.zip"
+ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 OPENFEMA_STATEMENT = "This product uses the Federal Emergency Management Agency’s OpenFEMA API, but is not endorsed by FEMA. The Federal Government or FEMA cannot vouch for the data or analyses derived from these data after the data have been retrieved from the Agency's website(s)."
 # The report's header, and the one that begins its part for communities not participating, where the eighth column gives the sanction's date instead.
 COLUMNS = ["CID", "Community Name", "County", "Init FHBM Identified", "Init FIRM Identified", "Curr Eff Map Date", "Tribal", "Reg-Emer Date", "CRS Entry Date", "Curr Eff Date", "Curr Class", "% Disc", "Program", "Participating Community"]
@@ -254,17 +257,38 @@ def harvest(fetcher):
     return {"csv": report, "retrieved_at": read_at, "api": api, "api_retrieved_at": api_read_at}
 
 
+def snapshot_bytes(snapshot):
+    """The snapshot zipped so that the same reading gives the same bytes on any machine: each member stored, not deflated, since zlib builds can deflate differently, dated ZIP_TIME and marked as made on Unix, which zipfile otherwise takes from the platform. A build commits these bytes only when they change."""
+    buffer = io.BytesIO()
+    read = json.dumps({"csv_url": CSV_URL, "retrieved_at": snapshot["retrieved_at"], "api_url": API_URL, "api_retrieved_at": snapshot["api_retrieved_at"]}, indent=1) + "\n"
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for name, data in (("nation.csv", snapshot["csv"]), ("NfipCommunityStatusBook.parquet", snapshot["api"]), ("read.json", read.encode())):
+            info = zipfile.ZipInfo(name, date_time=ZIP_TIME)
+            info.compress_type = zipfile.ZIP_STORED
+            info.create_system = 3
+            info.external_attr = 0o644 << 16
+            archive.writestr(info, data)
+    return buffer.getvalue()
+
+
 def save(snapshot, path):
-    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("nation.csv", snapshot["csv"])
-        archive.writestr("NfipCommunityStatusBook.parquet", snapshot["api"])
-        archive.writestr("read.json", json.dumps({"csv_url": CSV_URL, "retrieved_at": snapshot["retrieved_at"], "api_url": API_URL, "api_retrieved_at": snapshot["api_retrieved_at"]}, indent=1) + "\n")
+    with open(path, "wb") as handle:
+        handle.write(snapshot_bytes(snapshot))
 
 
-def load(path):
-    with zipfile.ZipFile(path) as archive:
+def load(source):
+    """source is a path to a saved snapshot, or its bytes."""
+    with zipfile.ZipFile(io.BytesIO(source) if isinstance(source, bytes) else source) as archive:
         read = json.loads(archive.read("read.json"))
         return {"csv": archive.read("nation.csv"), "retrieved_at": read["retrieved_at"], "api": archive.read("NfipCommunityStatusBook.parquet"), "api_retrieved_at": read["api_retrieved_at"]}
+
+
+def differs(snapshot, source):
+    """Which of the snapshot's files and reading times are not the ones source, a manifest's nfip_communities record, gives; [] when it is that reading."""
+    api = source.get("api") or {}
+    read = {"nation.csv": hashlib.sha256(snapshot["csv"]).hexdigest(), "retrieved_at": snapshot["retrieved_at"], "NfipCommunityStatusBook.parquet": hashlib.sha256(snapshot["api"]).hexdigest(), "api_retrieved_at": snapshot["api_retrieved_at"]}
+    recorded = {"nation.csv": source.get("sha256"), "retrieved_at": source.get("retrieved_at"), "NfipCommunityStatusBook.parquet": api.get("sha256"), "api_retrieved_at": api.get("retrieved_at")}
+    return sorted(key for key in read if read[key] != recorded[key])
 
 
 def after(table, day):

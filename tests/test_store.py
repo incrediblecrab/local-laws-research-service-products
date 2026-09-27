@@ -1,4 +1,4 @@
-"""HubStore against a fake Hub that behaves as the real one does where it matters: a commit whose parent is not the head is refused with 412, parquet files are LFS (a SHA-256), text files are git blobs (a SHA-1)."""
+"""HubStore against a fake Hub that behaves as the real one does where it matters: a commit whose parent is not the head is refused with 412, parquet and zip files are LFS (a SHA-256), as the dataset's .gitattributes makes them, and text files are git blobs (a SHA-1)."""
 
 import hashlib
 import json
@@ -25,7 +25,7 @@ def http_error(status):
 class FakeApi:
     """One branch. failures holds (error, lands) pairs that create_commit raises in turn; lands=True applies the commit first, as when a response is lost after the Hub wrote it."""
 
-    def __init__(self, files=None, lfs=(".parquet",)):
+    def __init__(self, files=None, lfs=(".parquet", ".zip")):
         self.files = dict(files or {})
         self.lfs = lfs
         self.commits = 0

@@ -65,6 +65,10 @@ class LocalStore:
         path = self.root / repo_path
         return path.read_text() if path.exists() else None
 
+    def read_bytes(self, repo_path):
+        path = self.root / repo_path
+        return path.read_bytes() if path.exists() else None
+
     def read_table(self, repo_path):
         path = self.root / repo_path
         return pq.read_table(path) if path.exists() else None
@@ -106,6 +110,11 @@ class HubStore:
         with tempfile.TemporaryDirectory(prefix="local-laws-") as directory:
             local = self._download(repo_path, directory)
             return local.read_text() if local else None
+
+    def read_bytes(self, repo_path):
+        with tempfile.TemporaryDirectory(prefix="local-laws-") as directory:
+            local = self._download(repo_path, directory)
+            return local.read_bytes() if local else None
 
     def read_table(self, repo_path):
         with tempfile.TemporaryDirectory(prefix="local-laws-") as directory:

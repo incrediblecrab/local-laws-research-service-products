@@ -3,6 +3,7 @@
 import datetime
 import io
 import re
+import zipfile
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -181,6 +182,26 @@ def test_harvest_reads_both_files_and_a_snapshot_saves_and_loads_them(tmp_path, 
     assert snapshot == nfip_snapshot() and fetcher.requests == 2
     nfip.save(snapshot, tmp_path / "nfip.zip")
     assert nfip.load(tmp_path / "nfip.zip") == snapshot
+
+
+def test_a_snapshot_is_the_same_bytes_for_the_same_reading_and_loads_from_them(tmp_path):
+    data = nfip.snapshot_bytes(nfip_snapshot())
+    nfip.save(nfip_snapshot(), tmp_path / "nfip.zip")
+    assert (tmp_path / "nfip.zip").read_bytes() == data == nfip.snapshot_bytes(nfip_snapshot())
+    assert nfip.load(data) == nfip.load(tmp_path / "nfip.zip") == nfip_snapshot()
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        assert [(info.filename, info.compress_type, info.date_time, info.create_system, info.external_attr >> 16) for info in archive.infolist()] == [
+            (name, zipfile.ZIP_STORED, (1980, 1, 1, 0, 0, 0), 3, 0o644) for name in ("nation.csv", "NfipCommunityStatusBook.parquet", "read.json")]
+    assert nfip.snapshot_bytes(nfip_snapshot() | {"retrieved_at": "2026-09-27T08:18:00Z"}) != data, "the reading's times are in the bytes"
+
+
+def test_differs_names_what_is_not_the_reading_a_manifest_records():
+    snapshot = nfip_snapshot()
+    source = nfip.source(snapshot, ROWS, nfip.reconcile(ROWS, NFIP_API))
+    assert nfip.differs(snapshot, source) == []
+    assert nfip.differs(snapshot | {"csv": NFIP_CSV + b"\n", "api_retrieved_at": "2026-09-27T08:23:00Z"}, source) == ["api_retrieved_at", "nation.csv"]
+    assert nfip.differs(snapshot | {"api": NFIP_API + b"\n", "retrieved_at": "2026-09-27T08:18:00Z"}, source) == ["NfipCommunityStatusBook.parquet", "retrieved_at"]
+    assert nfip.differs(snapshot, {}) == ["NfipCommunityStatusBook.parquet", "api_retrieved_at", "nation.csv", "retrieved_at"]
 
 
 def test_the_source_records_the_reading_and_the_dates_after_it():

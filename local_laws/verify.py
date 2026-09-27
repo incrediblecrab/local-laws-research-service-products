@@ -4,13 +4,16 @@ import datetime
 import hashlib
 import json
 import re
+import zipfile
 from collections import Counter
 
+import httpx
 import pyarrow as pa
 
 from . import census, locus, nfip, nyindex, nylaws, tribes
 from .build import summarize
 from .card import render
+from .http import Blocked, Unavailable
 from .schema import TABLES
 from .store import CARD, HUB_FILES, MANIFEST
 
@@ -247,18 +250,40 @@ def check_nfip(rows, source, problems):
 
 
 def compare_nfip(rows, fetcher, source, problems):
-    """The published rows against FEMA's report read again: when it is still the file the build read, every row field for field. FEMA regenerates the report, so a different file is reported, not a problem."""
-    data = fetcher.get(nfip.CSV_URL)
+    """The published rows against FEMA's report read again: when it is still the file the build read, every row field for field. FEMA regenerates the report, so a different file is reported, not a problem; so is a refusal, since fema.gov has refused GitHub-hosted runners, and check_nfip_snapshot compares the rows without it."""
+    try:
+        data = fetcher.get(nfip.CSV_URL)
+    except (Blocked, Unavailable, httpx.HTTPStatusError) as error:
+        return {"same_file": None, "unreadable": f"{type(error).__name__}: {error}"}
     if hashlib.sha256(data).hexdigest() != source.get("sha256"):
         return {"same_file": False}
+    return {"same_file": True, "rows": same_rows(rows, data, "the report", problems)}
+
+
+def same_rows(rows, data, report, problems):
+    """Names each published row that is not the one the report data gives at its cid, and each community the report has that the table lacks; returns the report's row count."""
     expected = {row["cid"]: row for row in nfip.rows(data)}
     changed = [row["cid"] for row in rows if row != expected.get(row["cid"])]
     if changed:
-        problems.append(f"nfip_communities: rows that are not the report's community at their cid: {sample(changed)}")
+        problems.append(f"nfip_communities: rows that are not {report}'s community at their cid: {sample(changed)}")
     missing = sorted(set(expected) - {row["cid"] for row in rows})
     if missing:
-        problems.append(f"nfip_communities: communities in the report not in the table: {sample(missing)}")
-    return {"same_file": True, "rows": len(expected)}
+        problems.append(f"nfip_communities: communities in {report} not in the table: {sample(missing)}")
+    return len(expected)
+
+
+def check_nfip_snapshot(rows, store, source, problems):
+    """The FEMA files the build stored against the manifest's record of what it read, then the published rows against the rows the stored report gives. It needs no network, so it runs where fema.gov refuses requests, and it passes only when a run that fema.gov refuses can build from the stored files."""
+    try:
+        snapshot = nfip.load(store.read_bytes(nfip.SNAPSHOT))
+    except (zipfile.BadZipFile, KeyError, ValueError, TypeError) as error:
+        problems.append(f"{nfip.SNAPSHOT} cannot be read as a snapshot: {type(error).__name__}: {error}")
+        return None
+    differ = nfip.differs(snapshot, source)
+    if differ:
+        problems.append(f"{nfip.SNAPSHOT} is not the reading the manifest's nfip_communities source records: its {differ} differ")
+        return {"same_file": False}
+    return {"same_file": True, "rows": same_rows(rows, snapshot["csv"], "the stored report", problems)}
 
 
 def verify(store, fetcher=None, stated_rows=None):
@@ -347,6 +372,8 @@ def verify(store, fetcher=None, stated_rows=None):
     communities = tables.get("nfip_communities")
     if communities is not None:
         check_nfip(communities, sources.get("nfip_communities") or {}, problems)
+        if nfip.SNAPSHOT in entries and nfip.SNAPSHOT in listed:
+            report["nfip_snapshot"] = check_nfip_snapshot(communities, store, sources.get("nfip_communities") or {}, problems)
         if fetcher is not None:
             report["nfip_report"] = compare_nfip(communities, fetcher, sources.get("nfip_communities") or {}, problems)
     if governments is not None and crosswalk is not None and ny is not None and index is not None and recognized is not None and communities is not None:

@@ -2,15 +2,17 @@
 
 import json
 
+import httpx
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-from conftest import NFIP_CSV, NY_INDEX, NY_SAMPLE, ORG02, TRIBES_NOTICE, TRIBES_PREVIOUS, FakeFetcher, sha256
+from conftest import NFIP_API, NFIP_CSV, NY_INDEX, NY_SAMPLE, ORG02, TRIBES_NOTICE, TRIBES_PREVIOUS, FakeFetcher, nfip_snapshot, rezipped, sha256
 from local_laws import census, locus, nfip, nyindex, tribes
 from local_laws.build import SORT_KEYS, manifest_text, summarize
 from local_laws.card import render
 from local_laws.census import SourceChanged
+from local_laws.http import Blocked, Unavailable
 from local_laws.schema import TABLES
 from local_laws.store import CARD, MANIFEST, sha256_file, write_parquet
 from local_laws.verify import verify
@@ -64,7 +66,7 @@ def row(rows, **match):
 def test_a_clean_build_has_no_problems(published):
     store, manifest = published
     report = verify(store, fetcher=FakeFetcher(), stated_rows=lambda: manifest["sources"]["locus"]["rows"])
-    assert report == {"rows": ROWS, "org02_counts_compared": 312, "locus_stated_rows": manifest["sources"]["locus"]["rows"], "ny_index_state_records": 14, "tribes_notice_entries": 19, "nfip_report": {"same_file": True, "rows": 25}, "problems": []}
+    assert report == {"rows": ROWS, "org02_counts_compared": 312, "locus_stated_rows": manifest["sources"]["locus"]["rows"], "ny_index_state_records": 14, "tribes_notice_entries": 19, "nfip_snapshot": {"same_file": True, "rows": 25}, "nfip_report": {"same_file": True, "rows": 25}, "problems": []}
 
 
 @pytest.mark.parametrize("edit, expected", [
@@ -362,12 +364,55 @@ def test_each_planted_nfip_defect_is_named_even_in_a_consistent_manifest(publish
     assert all(any(problem.startswith(start) for problem in problems) for start in expected), problems
 
 
-def test_a_value_only_the_report_holds_is_caught_only_by_reading_the_report_again(published):
+def test_a_value_only_the_report_holds_is_caught_only_by_reading_the_report_or_its_stored_copy(published):
     store, _ = published
     edit_table(store, NFIP, lambda rows: community(rows, "010116").update(crs_class=6))
     reseal(store)
-    assert check(store) == [f"{NFIP}: rows that are not the report's community at their cid: 1 (010116)"]
-    assert check(store, fetcher=False) == []
+    assert check(store) == [f"{NFIP}: rows that are not the stored report's community at their cid: 1 (010116)", f"{NFIP}: rows that are not the report's community at their cid: 1 (010116)"]
+    assert check(store, fetcher=False) == [f"{NFIP}: rows that are not the stored report's community at their cid: 1 (010116)"], "the stored copy needs no network"
+    edit_manifest(store, lambda manifest: manifest["files"].pop(nfip.SNAPSHOT))
+    (store.root / nfip.SNAPSHOT).unlink()
+    (store.root / CARD).write_text(render(json.loads(store.read_text(MANIFEST))))
+    assert check(store, fetcher=False) == [], "without the stored copy, only fema.gov holds the value"
+
+
+def store_snapshot(store, data, relist=True):
+    """Replace the stored FEMA files with data, and with relist the manifest's SHA-256 and size for them, as a build that was consistently wrong would."""
+    (store.root / nfip.SNAPSHOT).write_bytes(data)
+    if relist:
+        edit_manifest(store, lambda manifest: manifest["files"][nfip.SNAPSHOT].update(bytes=len(data), sha256=sha256(data)))
+
+
+@pytest.mark.parametrize("data, relist, expected", [
+    (lambda: nfip.snapshot_bytes(nfip_snapshot() | {"csv": NFIP_CSV + b"\n"}), True, [f"{nfip.SNAPSHOT} is not the reading the manifest's nfip_communities source records: its ['nation.csv'] differ"]),
+    (lambda: nfip.snapshot_bytes(nfip_snapshot() | {"api": NFIP_API + b"\n"}), True, [f"{nfip.SNAPSHOT} is not the reading the manifest's nfip_communities source records: its ['NfipCommunityStatusBook.parquet'] differ"]),
+    (lambda: nfip.snapshot_bytes(nfip_snapshot() | {"retrieved_at": "2026-09-27T08:18:00Z", "api_retrieved_at": "2026-09-27T08:23:00Z"}), True, [f"{nfip.SNAPSHOT} is not the reading the manifest's nfip_communities source records: its ['api_retrieved_at', 'retrieved_at'] differ"]),
+    (lambda: b"not a zip", True, [f"{nfip.SNAPSHOT} cannot be read as a snapshot: BadZipFile: File is not a zip file"]),
+    (lambda: rezipped(nfip_snapshot()), False, [f"{nfip.SNAPSHOT} has SHA-256"]),
+])
+def test_stored_fema_files_that_are_not_the_manifests_reading_are_named(published, data, relist, expected):
+    store, _ = published
+    store_snapshot(store, data(), relist)
+    problems = check(store)
+    assert len(problems) == len(expected) and all(problem.startswith(start) for problem, start in zip(problems, expected)), problems
+
+
+def test_stored_fema_files_missing_from_the_repo_are_named(published):
+    store, _ = published
+    (store.root / nfip.SNAPSHOT).unlink()
+    assert check(store) == [f"{nfip.SNAPSHOT} is in the manifest but not in the repo"]
+
+
+@pytest.mark.parametrize("refusal", [
+    lambda: httpx.HTTPStatusError("forbidden", request=httpx.Request("GET", nfip.CSV_URL), response=httpx.Response(403, request=httpx.Request("GET", nfip.CSV_URL))),
+    lambda: Blocked("bot challenge at www.fema.gov/cis/nation.csv"),
+    lambda: Unavailable("HTTP 503 from www.fema.gov/cis/nation.csv"),
+])
+def test_fema_refusing_verify_is_reported_not_a_problem(published, refusal):
+    store, manifest = published
+    error = refusal()
+    report = verify(store, fetcher=FakeFetcher({nfip.CSV_URL: error}), stated_rows=lambda: manifest["sources"]["locus"]["rows"])
+    assert (report["nfip_report"], report["nfip_snapshot"], report["problems"]) == ({"same_file": None, "unreadable": f"{type(error).__name__}: {error}"}, {"same_file": True, "rows": 25}, [])
 
 
 def test_a_report_fema_has_since_regenerated_is_reported_not_a_problem(published):
@@ -377,13 +422,14 @@ def test_a_report_fema_has_since_regenerated_is_reported_not_a_problem(published
 
 
 @pytest.mark.parametrize("edit, expected", [
-    (lambda source: source.update(rows=24), f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'rows': (25, 24)}}"),
-    (lambda source: source["api"].update(in_report=24), f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'api in_report': (25, 24)}}"),
-    (lambda source: source["after_retrieval"].pop(2), f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'after_retrieval': (6, 5)}}"),
-    (lambda source: source.update(retrieved_at="2026-10-30T08:18:00Z"), f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'after_retrieval': (3, 6)}}"),
+    (lambda source: source.update(rows=24), [f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'rows': (25, 24)}}"]),
+    (lambda source: source["api"].update(in_report=24), [f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'api in_report': (25, 24)}}"]),
+    (lambda source: source["after_retrieval"].pop(2), [f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'after_retrieval': (6, 5)}}"]),
+    (lambda source: source.update(retrieved_at="2026-10-30T08:18:00Z"), [f"{NFIP}: the table and the manifest's source disagree, (table, manifest): {{'after_retrieval': (3, 6)}}",
+                                                                          f"{nfip.SNAPSHOT} is not the reading the manifest's nfip_communities source records: its ['retrieved_at'] differ"]),
 ])
 def test_nfip_counts_in_the_manifest_that_are_not_the_tables_are_named(published, edit, expected):
     store, _ = published
     edit_manifest(store, lambda manifest: edit(manifest["sources"][NFIP]))
     (store.root / CARD).write_text(render(json.loads(store.read_text(MANIFEST))))
-    assert check(store) == [expected]
+    assert check(store) == expected

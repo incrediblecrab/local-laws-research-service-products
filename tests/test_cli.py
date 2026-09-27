@@ -1,6 +1,7 @@
 """python -m local_laws end to end on the fixtures: exit codes, what is written, and what is refused."""
 
 import copy
+import hashlib
 import itertools
 import json
 import os
@@ -8,12 +9,15 @@ import os
 import httpx
 import pytest
 
-from conftest import CODE, NY_SAMPLE, FakeFetcher, FakeNYApi, fake_locus_download, nfip_snapshot
+from conftest import CODE, NY_SAMPLE, FakeFetcher, FakeNYApi, fake_locus_download, nfip_snapshot, rezipped
 from local_laws import census, cli, locus, nfip, nyindex, nylaws, tribes
 from local_laws.http import Blocked, Unavailable
+from local_laws.schema import TABLES
 from local_laws.store import CARD, MANIFEST, LocalStore, Superseded
 
-FILES = [CARD, "data/federally_recognized_tribes.parquet", "data/governments.parquet", "data/locus_crosswalk.parquet", "data/nfip_communities.parquet", "data/ny_local_law_index.parquet", "data/ny_local_laws.parquet", MANIFEST]
+TABLE_NFIP = TABLES["nfip_communities"]["file"]
+
+FILES = [CARD, "data/federally_recognized_tribes.parquet", "data/governments.parquet", "data/locus_crosswalk.parquet", "data/nfip_communities.parquet", "data/ny_local_law_index.parquet", "data/ny_local_laws.parquet", MANIFEST, nfip.SNAPSHOT]
 
 
 @pytest.fixture
@@ -62,7 +66,7 @@ def test_run_writes_a_build_that_verifies_and_an_unchanged_rerun_writes_nothing(
     assert (out / MANIFEST).read_text() == manifest, "an unchanged rebuild is not committed, so even built_at stays"
     assert run("verify", "--local", str(out)) == 0
     report = json.loads(capsys.readouterr().out)
-    assert (report["problems"], report["org02_counts_compared"], report["locus_stated_rows"], report["nfip_report"]) == ([], 312, 71, {"same_file": True, "rows": 25})
+    assert (report["problems"], report["org02_counts_compared"], report["locus_stated_rows"], report["nfip_report"], report["nfip_snapshot"]) == ([], 312, 71, {"same_file": True, "rows": 25}, {"same_file": True, "rows": 25})
 
 
 def test_a_run_without_a_snapshot_reads_the_api_and_harvest_ny_saves_the_same_reading(tmp_path, offline, monkeypatch, capsys):
@@ -301,3 +305,75 @@ def test_github_actions_fema_403_warns_and_leaves_the_schedule_green(tmp_path, o
     assert "'content-type': 'text/html'" in out
     assert "No commit was written" in out
     assert not (tmp_path / "out" / MANIFEST).exists()
+
+
+def fema_403():
+    request = httpx.Request("GET", nfip.CSV_URL)
+    return httpx.HTTPStatusError("forbidden", request=request, response=httpx.Response(403, headers={"content-type": "text/html", "server": "AkamaiGHost"}, request=request))
+
+
+def later_new_york(tmp_path):
+    """The New York sample read again a day later, saved as harvest-ny saves it: a new reading, so a new build."""
+    later = copy.deepcopy(NY_SAMPLE) | {"started_at": "2026-09-27T04:00:00Z", "finished_at": "2026-09-27T04:20:00Z"}
+    path = tmp_path / "ny-later.json.gz"
+    nylaws.save(later, path)
+    return str(path)
+
+
+def output_json(out):
+    """The run's summary, printed after any warning lines."""
+    return json.loads(out[out.index("\n{\n") + 1:] if not out.startswith("{") else out)
+
+
+@pytest.mark.parametrize("refusal, actions, says", [
+    (fema_403, "true", "::warning::FEMA's Community Status Book could not be read: GET https://www.fema.gov/cis/nation.csv returned HTTP 403 with headers {'server': 'AkamaiGHost', 'content-type': 'text/html'}"),
+    (lambda: Blocked("bot challenge at www.fema.gov/cis/nation.csv"), None, "warning: FEMA's Community Status Book could not be read: Blocked: bot challenge at www.fema.gov/cis/nation.csv"),
+    (lambda: Unavailable("HTTP 503 from www.fema.gov/cis/nation.csv"), None, "warning: FEMA's Community Status Book could not be read: Unavailable: HTTP 503 from www.fema.gov/cis/nation.csv"),
+])
+def test_a_run_fema_refuses_builds_the_fema_table_from_the_stored_files_and_new_york_still_updates(tmp_path, offline, monkeypatch, capsys, snapshot, flood, refusal, actions, says):
+    out = tmp_path / "out"
+    assert run("run", "--local", str(out), "--ny-snapshot", snapshot, "--nfip-snapshot", flood) == 0
+    capsys.readouterr()
+    before = json.loads((out / MANIFEST).read_text())
+    stored = (out / nfip.SNAPSHOT).read_bytes()
+    monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher({nfip.CSV_URL: refusal()}))
+    if actions:
+        monkeypatch.setenv("GITHUB_ACTIONS", actions)
+    else:
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    assert run("run", "--local", str(out), "--ny-snapshot", later_new_york(tmp_path)) == 0
+    printed = capsys.readouterr().out
+    assert says in printed and "Building nfip_communities from sources/nfip_snapshot.zip, FEMA's files as read on 2026-09-26T08:18:00Z." in printed
+    summary = output_json(printed)
+    assert (summary["unchanged"], summary["commit"] is not None, summary["nfip_communities"]) == (False, True, 25)
+    after = json.loads((out / MANIFEST).read_text())
+    assert after["sources"]["ny_local_laws"]["finished_at"] == "2026-09-27T04:20:00Z", "New York's new reading is published"
+    assert after["sources"]["nfip_communities"] == before["sources"]["nfip_communities"], "the FEMA table stays at the reading it was built from"
+    assert [after["files"][path] for path in (TABLE_NFIP, nfip.SNAPSHOT)] == [before["files"][path] for path in (TABLE_NFIP, nfip.SNAPSHOT)] and (out / nfip.SNAPSHOT).read_bytes() == stored
+    assert "the FEMA table stays at the report as read on September 26, 2026" in (out / CARD).read_text()
+    assert run("verify", "--local", str(out)) == 0, "verify checks the rows against the stored report when fema.gov refuses it too"
+    report = json.loads(capsys.readouterr().out)
+    assert (report["problems"], report["nfip_snapshot"], report["nfip_report"]["same_file"]) == ([], {"same_file": True, "rows": 25}, None)
+
+
+@pytest.mark.parametrize("changes, relist, stop", [
+    ({}, False, "SourceChanged: sources/nfip_snapshot.zip is not the file the manifest lists"),
+    ({"retrieved_at": "2026-09-27T08:18:00Z"}, True, "SourceChanged: sources/nfip_snapshot.zip is not the reading the manifest records: its ['retrieved_at'] differ"),
+    ({"api_retrieved_at": "2026-09-27T08:23:00Z"}, True, "SourceChanged: sources/nfip_snapshot.zip is not the reading the manifest records: its ['api_retrieved_at'] differ"),
+])
+def test_stored_fema_files_that_are_not_the_manifests_reading_stop_the_run(tmp_path, offline, monkeypatch, capsys, snapshot, flood, changes, relist, stop):
+    out = tmp_path / "out"
+    assert run("run", "--local", str(out), "--ny-snapshot", snapshot, "--nfip-snapshot", flood) == 0
+    data = rezipped(nfip.load(out / nfip.SNAPSHOT), **changes)
+    (out / nfip.SNAPSHOT).write_bytes(data)
+    if relist:
+        manifest = json.loads((out / MANIFEST).read_text())
+        manifest["files"][nfip.SNAPSHOT] = {"bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        (out / MANIFEST).write_text(json.dumps(manifest))
+    published = (out / MANIFEST).read_text()
+    capsys.readouterr()
+    monkeypatch.setattr(cli, "Fetcher", lambda: FakeFetcher({nfip.CSV_URL: fema_403()}))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    assert run("run", "--local", str(out), "--ny-snapshot", later_new_york(tmp_path)) == cli.STOPPED
+    assert f"stopped, nothing written: {stop}" in capsys.readouterr().err
+    assert (out / MANIFEST).read_text() == published

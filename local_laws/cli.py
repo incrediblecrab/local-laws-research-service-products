@@ -87,6 +87,36 @@ def ci_fema_warning(error, store):
     github_output(commits=0)
     return True
 
+
+def stored_nfip_snapshot(store):
+    """The FEMA files the published build read, from the snapshot it stored, once they are shown to be the reading its manifest records; None if it stored none."""
+    text = store.read_text(MANIFEST)
+    manifest = json.loads(text) if text else {}
+    entry = (manifest.get("files") or {}).get(nfip.SNAPSHOT)
+    if entry is None:
+        return None
+    data = store.read_bytes(nfip.SNAPSHOT)
+    if data is None or hashlib.sha256(data).hexdigest() != entry.get("sha256"):
+        raise SourceChanged(f"{nfip.SNAPSHOT} is not the file the manifest lists")
+    snapshot = nfip.load(data)
+    differ = nfip.differs(snapshot, (manifest.get("sources") or {}).get("nfip_communities") or {})
+    if differ:
+        raise SourceChanged(f"{nfip.SNAPSHOT} is not the reading the manifest records: its {differ} differ")
+    return snapshot
+
+
+def read_fema(fetcher, store):
+    """FEMA's two files as fema.gov serves them now. When fema.gov refuses, as it refused GitHub-hosted runners on September 27, 2026, the files the published build read and stored, so that New York's filings still update and the FEMA table stays as published; with no stored files the error propagates, and nothing is written."""
+    try:
+        return nfip.harvest(fetcher)
+    except (Blocked, Unavailable, httpx.HTTPStatusError) as error:
+        stored = stored_nfip_snapshot(store)
+        if stored is None:
+            raise
+        refused = f"GET {error.request.url} returned HTTP {http_status(error)} with headers {response_headers(error)}" if isinstance(error, httpx.HTTPStatusError) else f"{type(error).__name__}: {error}"
+        warn(f"FEMA's Community Status Book could not be read: {refused}. Building nfip_communities from {nfip.SNAPSHOT}, FEMA's files as read on {stored['retrieved_at']}.")
+        return stored
+
 def publishable(args):
     """The code version to record, or None when writing to the Hub from code that is not committed: a published build names the commit that made it."""
     code = code_version()
@@ -110,7 +140,7 @@ def cmd_run(args):
     fetcher = Fetcher()
     try:
         snapshot = nylaws.load(args.ny_snapshot) if args.ny_snapshot else None
-        flood = nfip.load(args.nfip_snapshot) if args.nfip_snapshot else None
+        flood = nfip.load(args.nfip_snapshot) if args.nfip_snapshot else read_fema(fetcher, store)
         manifest, files = build(fetcher, workdir, ny_snapshot=snapshot, nfip_snapshot=flood, code=code)
         stats = manifest["stats"]
         summary = {"governments": stats["governments"], "locus_jurisdictions": stats["locus"]["jurisdictions"], "matched": stats["locus"]["matched"],
