@@ -292,6 +292,28 @@ def test_probe_can_skip_fema_when_the_report_host_refuses_the_cheap_read(publish
     report = json.loads(out[out.index("{"):])
     assert report["needed"] is False
     assert report["head"]["nfip"] is None
+    assert report["status"] == "degraded"
+    assert report["reasons"] == ["checked sources match; FEMA freshness is unverified"]
+    assert report["sources"]["ny"]["status"] == "unchanged"
+    assert report["sources"]["nfip"] == {"status": "unavailable", "retrieved_at": published[1]["sources"]["nfip_communities"]["retrieved_at"]}
+    assert "Last successful FEMA fetch" in out
+
+
+def test_unavailable_fema_does_not_block_a_changed_new_york_probe(published, offline, monkeypatch, capsys):
+    store, _ = published
+    monkeypatch.setattr(cli, "nfip_head", lambda fetcher: (_ for _ in ()).throw(fema_403()))
+    original = cli.ny_head
+
+    def changed(fetcher):
+        head = original(fetcher)
+        return dict(head, total=head["total"] + 1, stable=False)
+
+    monkeypatch.setattr(cli, "ny_head", changed)
+    assert run("probe", "--local", str(store.root)) == 0
+    report = output_json(capsys.readouterr().out)
+    assert report["needed"] is True and report["card_only"] is False and report["status"] == "degraded"
+    assert report["sources"]["ny"]["status"] == "changed"
+
 
 
 def test_github_actions_fema_403_warns_and_leaves_the_schedule_green(tmp_path, offline, monkeypatch, capsys):

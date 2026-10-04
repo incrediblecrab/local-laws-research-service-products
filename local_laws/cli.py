@@ -14,7 +14,7 @@ import httpx
 
 from . import REPO_ID, locus, nfip, nylaws, tribes
 from .build import build, code_version, unchanged
-from .card import render
+from .card import render, source_readings
 from .census import SourceChanged
 from huggingface_hub.errors import HfHubHTTPError
 from .http import Blocked, Fetcher, Unavailable
@@ -195,6 +195,8 @@ def nfip_head(fetcher):
 
 def probe_decision(manifest, card, head):
     reasons = []
+    readings = source_readings(manifest)
+    status = {"ny": "not_published", "nfip": "not_published" if head.get("nfip") is not None else "unavailable"}
     if manifest is None:
         reasons.append("no manifest is published")
     else:
@@ -202,17 +204,24 @@ def probe_decision(manifest, card, head):
         ny = sources.get("ny_local_laws", {})
         if ny.get("total") != head["ny"]["total"] or ny.get("years") != head["ny"]["years"]:
             reasons.append("New York local-law counts changed")
+        status["ny"] = "changed" if reasons or not head["ny"].get("stable") else "unchanged"
         if not head["ny"].get("stable"):
             reasons.append("New York local-law counts changed while probing")
         flood = sources.get("nfip_communities", {})
         api = flood.get("api", {})
         if head.get("nfip") is None:
-            pass
+            status["nfip"] = "unavailable"
         elif flood.get("sha256") != head["nfip"]["sha256"] or api.get("sha256") != head["nfip"]["api_sha256"]:
             reasons.append("FEMA Community Status Book changed")
+            status["nfip"] = "changed"
+        else:
+            status["nfip"] = "unchanged"
         if card != render(manifest):
             reasons.append("dataset card render changed")
-    return {"needed": bool(reasons), "reasons": reasons or ["published sources match"]}
+    degraded = head.get("nfip") is None
+    return {"needed": bool(reasons), "reasons": reasons or ["checked sources match; FEMA freshness is unverified" if degraded else "published sources match"],
+            "status": "degraded" if degraded else "update_needed" if reasons else "current",
+            "sources": {name: {"status": status[name], "retrieved_at": readings[name]} for name in readings}}
 
 def cmd_probe(args):
     fetcher = Fetcher()
@@ -226,7 +235,8 @@ def cmd_probe(args):
             head["nfip"] = nfip_head(fetcher)
         except (Blocked, Unavailable, httpx.HTTPStatusError, httpx.TransportError) as error:
             head["nfip"] = None
-            warn(f"FEMA probe skipped: {type(error).__name__}: {error}")
+            last = source_readings(manifest)["nfip"] or "unknown"
+            warn(f"FEMA probe skipped: {type(error).__name__}: {error}. Last successful FEMA fetch in the published manifest: {last}. FEMA freshness is unverified.")
     except (SourceChanged, Blocked, Unavailable, httpx.HTTPStatusError, httpx.TransportError) as error:
         warn(f"probe could not prove the dataset is current: {type(error).__name__}: {error}")
         github_output(needed="true", card_only="false")

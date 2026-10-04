@@ -47,6 +47,11 @@ def moment(value):
     return f"{day(value)}, {value[11:16]} UTC"
 
 
+def source_readings(manifest):
+    sources = (manifest or {}).get("sources", {})
+    return {"ny": sources.get("ny_local_laws", {}).get("finished_at"), "nfip": sources.get("nfip_communities", {}).get("retrieved_at")}
+
+
 def front_matter(total):
     lines = ["---", f"pretty_name: {TITLE}", "license: mit", "language:", "- en",
              "tags:", "- legal", "- government", "- local-government", "- ordinances", "- municipal-codes", "- local-laws", "- new-york", "- census", "- tribes", "- flood-insurance", "- fema", "- united-states",
@@ -698,6 +703,18 @@ def render(manifest):
         f"Every local government the Census Bureau's 2022 Census of Governments counts, {stats['governments']:,} of them in the 50 states and the District of Columbia; which of them have ordinance text in [LOCUS]({LOCUS_URL}), a public corpus of local ordinances; and every local law in the New York Department of State's online search, {stats['ny']['filings']:,} filings, with the State's older index of local laws, {stats['ny_index']['rows']:,} rows, each matched where it can be to the government that filed it. It maps who makes local law, how much of that law LOCUS holds, and, for New York, the local laws its governments have filed with the state since 1998 and, in the older index, with law years back to {stats['ny_index']['first_law_year']}; the laws' text is not here. Beside them, `federally_recognized_tribes` lists the {stats['tribes']['rows']:,} entries of the Bureau of Indian Affairs' list of federally recognized Tribes, whose governments the Census does not count among local governments, and `nfip_communities` the {stats['nfip']['rows']:,} communities in FEMA's Community Status Book, {stats['nfip']['participating']:,} of which participate in the National Flood Insurance Program, whose communities agree to adopt floodplain management regulations.",
         "",
         f"Every row is built by code: the Census files, LOCUS and New York's older index from versions pinned by SHA-256 or commit, which the build checks against each other, and the index against the State's own file in its release; the Bureau's list from its notice in the Federal Register, pinned by SHA-256 and checked against the notice it updates; New York's filings from the Department's search API as it answered on {day(ny['finished_at'])}, checked against the API's own counts; and the flood insurance communities from FEMA's report as fema.gov served it on {day(manifest['sources']['nfip_communities']['retrieved_at'])}, checked against OpenFEMA's copy of the book. The only hand-made input to the rows is {len(locus.ALIASES)} name aliases for LOCUS, listed under Matching. The pipeline and its tests are in [{GITHUB.removeprefix('https://')}]({GITHUB}), and this card is rendered from `manifest.json` in the same commit.",
+        "",
+    ]
+    readings = source_readings(manifest)
+    lines += [
+        "## Source freshness",
+        "",
+        "| Source | Published reading |",
+        "|---|---|",
+        f"| New York local-law filings | {moment(readings['ny'])} |",
+        f"| FEMA Community Status Book | {moment(readings['nfip'])} |",
+        "",
+        "A successful scheduled run does not prove FEMA is current. If fema.gov cannot be read, the run reports degraded freshness and retains the published FEMA reading while New York updates can continue. These dates describe the stored data, not the latest probe; the Actions summary reports which sources that probe could check.",
         "",
     ]
     lines += coverage(stats) + new_york(manifest) + ny_index(manifest) + recognized_tribes(manifest) + flood_communities(manifest) + use() + files(manifest) + matching(manifest) + codifiers(manifest) + gaps(manifest) + sources(manifest) + license_section(manifest) + by_state(stats)

@@ -25,6 +25,13 @@ def test_the_published_card_is_the_render_of_the_published_manifest(published):
     assert store.read_text(CARD) == render(json.loads(store.read_text("manifest.json"))) == render(json.loads(manifest_text(manifest)))
 
 
+def test_source_reading_dates_and_fema_freshness_limit_are_prominent(published):
+    card = render(published[1])
+    section = card[card.index("## Source freshness"):card.index("## Coverage")]
+    assert "New York" in section and "FEMA" in section
+    assert "September 26, 2026" in section and "does not prove FEMA is current" in section
+
+
 def test_front_matter_declares_each_config_and_the_license(published):
     meta = front_matter(render(published[1]))
     assert meta["license"] == "mit" and meta["size_categories"] == ["n<1K"]
