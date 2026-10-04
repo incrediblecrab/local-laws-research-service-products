@@ -111,6 +111,8 @@ def rows(data):
         values = [cell(value) for value in values]
         if len(values) != len(COLUMNS):
             raise SourceChanged(f"record {record} has {len(values)} values, not {len(COLUMNS)}")
+        if not any(value.strip() for value in values):
+            continue
         if values == COLUMNS:
             if not participating:
                 raise SourceChanged(f"record {record}: the participating communities' header again, after the part for those not participating")

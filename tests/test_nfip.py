@@ -1,5 +1,6 @@
 """FEMA's Community Status Book: the report read into one row per community, checked against OpenFEMA's copy, saved and loaded as a snapshot, and the counts the card shows."""
 
+import csv
 import datetime
 import io
 import re
@@ -47,6 +48,18 @@ def test_the_sample_reads_as_one_row_per_community_in_the_reports_order():
     assert (ROWS[0]["cid"], ROWS[0]["report_row"]) == ("010504", 2)
     assert community("010224")["report_row"] == community("010371")["report_row"] + 2, "the header the report repeats is skipped, not read as a community"
     assert ROWS[20]["cid"] == "010095", "the second part begins after its own header"
+
+
+@pytest.mark.parametrize("blank", [[""] * 14, ["", "\n", "", "", "", "", "", "", "", "", "", "", "", ""], [" \t"] * 14])
+def test_whitespace_only_records_are_not_communities_or_notes(blank):
+    records = list(csv.reader(io.StringIO(NFIP_CSV.decode(), newline="")))
+    records.insert(2, blank)
+    output = io.StringIO(newline="")
+    csv.writer(output).writerows(records)
+    parsed = nfip.rows(output.getvalue().encode())
+    assert len(parsed) == len(ROWS)
+    for actual, expected in zip(parsed, ROWS):
+        assert actual == dict(expected, report_row=expected["report_row"] + (expected["report_row"] > 2))
 
 
 def test_values_are_read_as_the_report_gives_them():
